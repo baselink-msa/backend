@@ -1,0 +1,26 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: game-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/baseball_platform
+    username: baseball
+    password: baseball
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+app:
+  jwt:
+    secret: ${APP_JWT_SECRET:local-dev-jwt-secret-key-change-me-please-32bytes-minimum}
+
+logging:
+  level:
+    com.baseball.game: DEBUG

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: baseball-postgres
+    environment:
+      POSTGRES_DB: baseball_platform
+      POSTGRES_USER: baseball
+      POSTGRES_PASSWORD: baseball
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - baseball-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baseball -d baseball_platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  baseball-pgdata:
