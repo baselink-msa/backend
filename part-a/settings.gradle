@@ -1,0 +1,5 @@
+rootProject.name = 'baseball-part-a'
+
+include 'auth-service'
+include 'game-service'
+include 'admin-service'
