@@ -1,21 +1,18 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
-import time
+from typing import Optional
 import boto3
-import json
-from botocore.exceptions import NoCredentialsError, ClientError
-from botocore.session import Session
+from botocore.exceptions import NoCredentialsError
 
 app = FastAPI(title="AI Chatbot Service", description="야구 규칙 및 구장 안내 FAQ + AI 챗봇 API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"], 
-    allow_headers=["*"], 
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 MOCK_FAQS = [
@@ -24,10 +21,14 @@ MOCK_FAQS = [
 ]
 
 session = boto3.Session(profile_name="nyl")
-bedrock_client = session.client(
-    service_name='bedrock-runtime',
+
+bedrock_agent_client = session.client(
+    service_name='bedrock-agent-runtime',
     region_name='ap-northeast-2'
 )
+
+KNOWLEDGE_BASE_ID = "49LLIN3BEV"
+MODEL_ARN = "arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
 
 class ChatRequest(BaseModel):
     message: str
@@ -46,7 +47,7 @@ def get_faqs(category: Optional[str] = None):
 @app.post("/api/chatbot/messages")
 def ask_chatbot(request: ChatRequest):
     clean_message = request.message.replace(" ", "").lower()
-    
+
     for faq in MOCK_FAQS:
         if faq["question"].replace(" ", "").lower() == clean_message:
             return {
@@ -57,33 +58,31 @@ def ask_chatbot(request: ChatRequest):
                     "cached": True
                 }
             }
-            
-    try:
-        prompt = f"""
-        너는 친절하고 전문적인 한국 프로야구 고객센터 AI 챗봇이야. 
-        사용자의 질문에 대해 3문장 이내로 아주 쉽고 친절하게 대답해줘.
-        사용자 질문: {request.message}
-        """
-        
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 300,
-            "messages": [{"role": "user", "content": prompt}]
-        })
 
-        response = bedrock_client.invoke_model(
-            modelId='anthropic.claude-3-haiku-20240307-v1:0',
-            body=body
+    try:
+        response = bedrock_agent_client.retrieve_and_generate(
+            input={"text": f"한국어로 답해줘. 야구나 구장, 주문 관련 질문이 아니면 '죄송합니다. 야구 및 구장 관련 질문만 답변 가능합니다.' 라고 해줘. 질문: {request.message}"},
+            retrieveAndGenerateConfiguration={
+                "type": "KNOWLEDGE_BASE",
+                "knowledgeBaseConfiguration": {
+                    "knowledgeBaseId": KNOWLEDGE_BASE_ID,
+                    "modelArn": MODEL_ARN,
+                    "retrievalConfiguration": {
+                        "vectorSearchConfiguration": {
+                            "numberOfResults": 3
+                        }
+                    }
+                }
+            }
         )
-        
-        response_body = json.loads(response.get('body').read())
-        ai_answer = response_body.get('content')[0].get('text')
+
+        ai_answer = response["output"]["text"]
 
         return {
             "success": True,
             "data": {
                 "answer": ai_answer,
-                "source": "AWS Bedrock (AI)",
+                "source": "AWS Bedrock Knowledge Base",
                 "cached": False
             }
         }
@@ -93,7 +92,7 @@ def ask_chatbot(request: ChatRequest):
             "success": False,
             "error": {
                 "code": "AWS_CREDENTIALS_MISSING",
-                "message": "AWS 자격 증명(Access Key)이 설정되지 않아 AI를 호출할 수 없습니다."
+                "message": "AWS 자격 증명이 설정되지 않았습니다."
             }
         }
     except Exception as e:
