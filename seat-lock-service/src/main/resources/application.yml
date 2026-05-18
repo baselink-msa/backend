@@ -1,9 +1,9 @@
 server:
-  port: 8084
+  port: 8086
 
 spring:
   application:
-    name: waiting-room-service
+    name: seat-lock-service
   data:
     redis:
       host: localhost

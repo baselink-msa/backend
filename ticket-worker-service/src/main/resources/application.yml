@@ -1,5 +1,5 @@
 server:
-  port: 8082
+  port: 8085
 
 spring:
   application:
@@ -8,8 +8,8 @@ spring:
   # 데이터베이스 연결 설정 (ticket-service와 완벽히 동일하게 수정!)
   datasource:
     url: jdbc:postgresql://localhost:5432/baseball_platform
-    username: baseball_user
-    password: baseball_password
+    username: baseball
+    password: baseball
     driver-class-name: org.postgresql.Driver
   
   jpa:

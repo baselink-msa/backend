@@ -2,11 +2,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
+import os
 import time
 import boto3
 import json
 from botocore.exceptions import NoCredentialsError, ClientError
-from botocore.session import Session
 
 app = FastAPI(title="AI Chatbot Service", description="야구 규칙 및 구장 안내 FAQ + AI 챗봇 API")
 
@@ -23,10 +23,11 @@ MOCK_FAQS = [
     {"faqId": 2, "category": "TERM", "question": "병살타가 뭐야?", "answer": "병살타는 하나의 플레이로 두 명의 주자가 아웃되는 상황입니다."}
 ]
 
-session = boto3.Session(profile_name="nyl")
-bedrock_client = session.client(
+bedrock_client = boto3.client(
     service_name='bedrock-runtime',
-    region_name='ap-northeast-2'
+    region_name=os.getenv("AWS_DEFAULT_REGION", "ap-northeast-2"),
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
 )
 
 class ChatRequest(BaseModel):
