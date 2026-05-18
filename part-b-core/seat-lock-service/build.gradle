@@ -1,0 +1,37 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '4.0.6'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.baseball'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(17)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+    // 1. Spring Boot Web & 기본 설정 (4.0.6 버전에 맞춰 자동 관리됨)
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    
+    // 2. Redis & Redisson
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.redisson:redisson:3.30.0'  // '-spring-boot-starter'를 제거합니다.
+
+    // 3. 편의 기능
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}

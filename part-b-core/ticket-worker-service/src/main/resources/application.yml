@@ -1,0 +1,33 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: ticket-worker-service
+  
+  # 데이터베이스 연결 설정 (ticket-service와 완벽히 동일하게 수정!)
+  datasource:
+    url: jdbc:postgresql://localhost:5432/baseball_platform
+    username: baseball_user
+    password: baseball_password
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:               # <--- 여기서부터 추가
+      hibernate:
+        hbm2ddl:
+          create_namespaces: true
+
+  # SQS (Spring Cloud AWS) 연결 설정
+  cloud:
+    aws:
+      credentials:
+        access-key: test
+        secret-key: test
+      region:
+        static: ap-northeast-2
+      sqs:
+        endpoint: http://localhost:9324

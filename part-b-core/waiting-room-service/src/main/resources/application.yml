@@ -1,0 +1,10 @@
+server:
+  port: 8081  # 대기열 서비스는 8081 포트를 사용합니다!
+
+spring:
+  application:
+    name: waiting-room-service
+  data:
+    redis:
+      host: localhost
+      port: 6379

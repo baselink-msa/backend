@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: ticket-service
+
+  # 데이터베이스 연결 설정
+  datasource:
+    url: jdbc:postgresql://localhost:5432/baseball_platform
+    username: baseball_user
+    password: baseball_password
+    driver-class-name: org.postgresql.Driver
+
+  # JPA (Hibernate) 설정
+  jpa:
+    hibernate:
+      ddl-auto: update  # 개발 환경에서만 update 사용
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+  # Redis 연결 설정
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+# SQS (Spring Cloud AWS) 설정
+spring.cloud.aws:
+  credentials:
+    access-key: test
+    secret-key: test
+  region:
+    static: ap-northeast-2
+  sqs:
+    endpoint: http://localhost:9324  # ElasticMQ 로컬 엔드포인트

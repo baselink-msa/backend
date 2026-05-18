@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL (RDS 대체)
+  postgres:
+    image: postgres:15
+    container_name: baseball-postgres
+    environment:
+      POSTGRES_USER: baseball_user
+      POSTGRES_PASSWORD: baseball_password
+      POSTGRES_DB: baseball_platform
+    ports:
+      - "5432:5432"
+
+  # 2. Redis (ElastiCache 대체 - 대기열 및 좌석 잠금용)
+  redis:
+    image: redis:alpine
+    container_name: baseball-redis
+    ports:
+      - "6379:6379"
+
+  # 3. ElasticMQ (SQS 대체 - 예매 확정 비동기 메시지용)
+  sqs:
+    image: softwaremill/elasticmq-native
+    container_name: baseball-sqs
+    ports:
+      - "9324:9324"
+      - "9325:9325"
