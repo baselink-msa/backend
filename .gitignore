@@ -1,5 +1,8 @@
 venv/
+env/
 __pycache__/
+*.pyc
 aws/
 awscliv2.zip
 *.pyc
+.env
