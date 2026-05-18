@@ -1,77 +1,106 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import time
+import boto3
+import json
+from botocore.exceptions import NoCredentialsError, ClientError
+from botocore.session import Session
 
-app = FastAPI(title="AI Chatbot Service", description="야구 규칙 및 구장 안내 FAQ 챗봇 API (Mock)")
+app = FastAPI(title="AI Chatbot Service", description="야구 규칙 및 구장 안내 FAQ + AI 챗봇 API")
 
-# --- [가짜(Mock) 데이터베이스 세팅] ---
-# 나중에 Redis 캐시와 RDS(PostgreSQL), S3를 연동해서 대체할 부분입니다.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"], 
+    allow_headers=["*"], 
+)
+
 MOCK_FAQS = [
     {"faqId": 1, "category": "RULE", "question": "스트라이크가 뭐야?", "answer": "스트라이크는 타자가 치지 않았거나 헛스윙한 공 중 심판이 스트라이크로 판정한 공입니다."},
-    {"faqId": 2, "category": "TERM", "question": "병살타가 뭐야?", "answer": "병살타는 하나의 플레이로 두 명의 주자가 아웃되는 상황입니다."},
-    {"faqId": 3, "category": "STADIUM", "question": "구장 내 흡연이 가능한가요?", "answer": "경기장 내 모든 구역은 금연입니다. 지정된 흡연 구역을 이용해 주세요."},
-    {"faqId": 4, "category": "TICKETING", "question": "티켓 취소는 언제까지 가능한가요?", "answer": "경기 시작 2시간 전까지 취소 가능합니다. 이후에는 취소가 불가합니다."},
-    {"faqId": 5, "category": "ORDER", "question": "주류 주문은 어떻게 하나요?", "answer": "앱 내 주문 서비스에서 원하는 메뉴를 선택하여 주문할 수 있습니다."}
+    {"faqId": 2, "category": "TERM", "question": "병살타가 뭐야?", "answer": "병살타는 하나의 플레이로 두 명의 주자가 아웃되는 상황입니다."}
 ]
 
-# --- [Pydantic 모델 정의] ---
+session = boto3.Session(profile_name="nyl")
+bedrock_client = session.client(
+    service_name='bedrock-runtime',
+    region_name='ap-northeast-2'
+)
+
 class ChatRequest(BaseModel):
     message: str
 
-# --- [API 엔드포인트 구현] ---
-
 @app.get("/")
 def root():
-    return {"message": "AI 챗봇 서비스가 정상 작동 중입니다! /docs 로 이동해서 API를 확인하세요."}
+    return {"message": "AI 챗봇 서비스가 정상 작동 중입니다!"}
 
-# 10-1. FAQ 목록 조회
 @app.get("/api/chatbot/faqs")
 def get_faqs(category: Optional[str] = None):
-    # 카테고리가 지정되면 필터링, 아니면 전체 반환
     result = MOCK_FAQS
     if category:
         result = [f for f in MOCK_FAQS if f["category"] == category]
-    
-    return {
-        "success": True,
-        "data": result
-    }
+    return {"success": True, "data": result}
 
-# 10-2. 챗봇 질문
 @app.post("/api/chatbot/messages")
 def ask_chatbot(request: ChatRequest):
-    # 챗봇이 답변을 고민하는 척 약간의 지연 시간을 둡니다. (Mock 효과)
-    time.sleep(0.5)
-
-    # 1단계: MOCK_FAQS에서 유사 질문 검색 (가장 원시적인 형태)
-    # 실제로는 Redis 캐시 확인 -> RDS FAQ 검색 -> Bedrock LLM 호출 순서로 진행될 예정
-    
-    # 공백 제거 및 소문자 변환 후 비교
     clean_message = request.message.replace(" ", "").lower()
     
-    faq_answer = None
     for faq in MOCK_FAQS:
         if faq["question"].replace(" ", "").lower() == clean_message:
-            faq_answer = faq["answer"]
-            break
+            return {
+                "success": True,
+                "data": {
+                    "answer": faq["answer"],
+                    "source": "FAQ (DB/Redis)",
+                    "cached": True
+                }
+            }
             
-    if faq_answer:
+    try:
+        prompt = f"""
+        너는 친절하고 전문적인 한국 프로야구 고객센터 AI 챗봇이야. 
+        사용자의 질문에 대해 3문장 이내로 아주 쉽고 친절하게 대답해줘.
+        사용자 질문: {request.message}
+        """
+        
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 300,
+            "messages": [{"role": "user", "content": prompt}]
+        })
+
+        response = bedrock_client.invoke_model(
+            modelId='anthropic.claude-3-haiku-20240307-v1:0',
+            body=body
+        )
+        
+        response_body = json.loads(response.get('body').read())
+        ai_answer = response_body.get('content')[0].get('text')
+
         return {
             "success": True,
             "data": {
-                "answer": faq_answer,
-                "source": "FAQ", # 답변 출처 명시
-                "cached": False  # 캐시 여부 표시
+                "answer": ai_answer,
+                "source": "AWS Bedrock (AI)",
+                "cached": False
             }
         }
-        
-    # 2단계: FAQ에 없는 질문인 경우 (가짜 대답 반환)
-    return {
-        "success": True,
-        "data": {
-            "answer": f"'{request.message}' - 질문에 대한 AI 답변을 생성 중입니다! (실제 AI 연동 준비 대기 중)",
-            "source": "Mock Data", # 출처 명시
-            "cached": False  # 캐시 여부 표시
+
+    except NoCredentialsError:
+        return {
+            "success": False,
+            "error": {
+                "code": "AWS_CREDENTIALS_MISSING",
+                "message": "AWS 자격 증명(Access Key)이 설정되지 않아 AI를 호출할 수 없습니다."
+            }
         }
-    }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": {
+                "code": "AI_GENERATION_FAILED",
+                "message": f"AI 답변 생성 중 오류가 발생했습니다: {str(e)}"
+            }
+        }
