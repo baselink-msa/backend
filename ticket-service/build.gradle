@@ -1,39 +1,14 @@
-plugins {
-    id 'java'
-    id 'org.springframework.boot' version '3.3.0' // <-- 3.3.0으로 변경!
-    id 'io.spring.dependency-management' version '1.1.4'
-}
-
-group = 'com.baseball'
-version = '0.0.1-SNAPSHOT'
-
-java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(17)
-	}
-}
-
-repositories {
-	mavenCentral()
-}
-
 dependencies {
-    // 기존 의존성들 유지하되, SQS 버전 확인!
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     runtimeOnly 'org.postgresql:postgresql'
 
-    // 3. AWS SQS 버전을 3.1.1로 세팅!
+    // AWS SQS
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs:3.1.1'
     implementation 'software.amazon.awssdk:sts:2.21.46'
 
-    // Lombok 및 테스트 의존성들...
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
-}
-
-tasks.named('test') {
-	useJUnitPlatform()
 }
