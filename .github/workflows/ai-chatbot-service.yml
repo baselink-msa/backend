@@ -34,9 +34,9 @@ jobs:
         run: |
           docker build \
             -f ./ai-chatbot-service/Dockerfile \
-            -t ${{ env.ECR_REGISTRY }}/ai-chatbot-service:${{ github.sha }} \
+            -t ${{ env.ECR_REGISTRY }}/dev-ai-chatbot-service:${{ github.sha }} \
             .
-          docker push ${{ env.ECR_REGISTRY }}/ai-chatbot-service:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/dev-ai-chatbot-service:${{ github.sha }}
 
       - name: kustomize 설치
         if: github.ref == 'refs/heads/main'
@@ -48,7 +48,7 @@ jobs:
           git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/baselink-msa/git-ops.git
           cd git-ops/overlays/dev
 
-          kustomize edit set image ai-chatbot-service=${{ env.ECR_REGISTRY }}/ai-chatbot-service:${{ github.sha }}
+          kustomize edit set image ai-chatbot-service=${{ env.ECR_REGISTRY }}/dev-ai-chatbot-service:${{ github.sha }}
 
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"

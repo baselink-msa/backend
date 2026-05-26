@@ -34,9 +34,9 @@ jobs:
         run: |
           docker build \
             -f ./order-service/Dockerfile \
-            -t ${{ env.ECR_REGISTRY }}/order-service:${{ github.sha }} \
+            -t ${{ env.ECR_REGISTRY }}/dev-order-service:${{ github.sha }} \
             .
-          docker push ${{ env.ECR_REGISTRY }}/order-service:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/dev-order-service:${{ github.sha }}
 
       - name: kustomize 설치
         if: github.ref == 'refs/heads/main'
@@ -48,7 +48,7 @@ jobs:
           git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/baselink-msa/git-ops.git
           cd git-ops/overlays/dev
 
-          kustomize edit set image order-service=${{ env.ECR_REGISTRY }}/order-service:${{ github.sha }}
+          kustomize edit set image order-service=${{ env.ECR_REGISTRY }}/dev-order-service:${{ github.sha }}
 
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"

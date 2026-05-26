@@ -34,9 +34,9 @@ jobs:
         run: |
           docker build \
             -f ./ticket-worker-service/Dockerfile \
-            -t ${{ env.ECR_REGISTRY }}/ticket-worker-service:${{ github.sha }} \
+            -t ${{ env.ECR_REGISTRY }}/dev-ticket-worker-service:${{ github.sha }} \
             .
-          docker push ${{ env.ECR_REGISTRY }}/ticket-worker-service:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/dev-ticket-worker-service:${{ github.sha }}
 
       - name: kustomize 설치
         if: github.ref == 'refs/heads/main'
@@ -48,7 +48,7 @@ jobs:
           git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/baselink-msa/git-ops.git
           cd git-ops/overlays/dev
 
-          kustomize edit set image ticket-worker-service=${{ env.ECR_REGISTRY }}/ticket-worker-service:${{ github.sha }}
+          kustomize edit set image ticket-worker-service=${{ env.ECR_REGISTRY }}/dev-ticket-worker-service:${{ github.sha }}
 
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
