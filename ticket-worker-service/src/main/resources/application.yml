@@ -24,10 +24,7 @@ spring:
   # SQS (Spring Cloud AWS) 연결 설정
   cloud:
     aws:
-      credentials:
-        access-key: test
-        secret-key: test
       region:
         static: ap-northeast-2
       sqs:
-        endpoint: http://localhost:9324
+        endpoint: ${SPRING_CLOUD_AWS_SQS_ENDPOINT:http://localhost:9324}
