@@ -35,7 +35,7 @@ jobs:
           docker build \
             -f ./ai-chatbot-service/Dockerfile \
             -t ${{ env.ECR_REGISTRY }}/dev-ai-chatbot-service:${{ github.sha }} \
-            .
+            ./ai-chatbot-service
           docker push ${{ env.ECR_REGISTRY }}/dev-ai-chatbot-service:${{ github.sha }}
 
       - name: kustomize 설치

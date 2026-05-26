@@ -35,7 +35,7 @@ jobs:
           docker build \
             -f ./order-service/Dockerfile \
             -t ${{ env.ECR_REGISTRY }}/dev-order-service:${{ github.sha }} \
-            .
+            ./order-service
           docker push ${{ env.ECR_REGISTRY }}/dev-order-service:${{ github.sha }}
 
       - name: kustomize 설치
