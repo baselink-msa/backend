@@ -55,3 +55,4 @@ jobs:
           git add .
           git commit -m "deploy: update ticket-worker-service to ${{ github.sha }}"
           git push
+
