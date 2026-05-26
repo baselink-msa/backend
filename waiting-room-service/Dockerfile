@@ -5,6 +5,6 @@ RUN gradle bootJar --no-daemon -x test
 
 FROM eclipse-temurin:17-jre
 WORKDIR /app
-COPY --from=build /workspace/build/libs/*.jar app.jar
+COPY --from=build /workspace/waiting-room-service/build/libs/*.jar app.jar
 EXPOSE 8084
 ENTRYPOINT ["java", "-jar", "app.jar"]
