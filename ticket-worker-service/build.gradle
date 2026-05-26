@@ -27,6 +27,7 @@ dependencies {
 
     // 3. AWS SQS (Spring Cloud AWS) - Spring Boot 3.x 완벽 호환 버전
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs:3.1.1'
+    implementation 'software.amazon.awssdk:sts:2.21.46'
 
     // 4. Lombok
     compileOnly 'org.projectlombok:lombok'
