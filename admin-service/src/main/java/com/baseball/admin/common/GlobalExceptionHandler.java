@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -26,6 +27,13 @@ public class GlobalExceptionHandler {
                 .orElse("잘못된 요청입니다.");
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error("INVALID_REQUEST", message));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMessageNotReadable(HttpMessageNotReadableException e) {
+        log.warn("요청 본문을 읽을 수 없음", e);
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.error("INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다."));
     }
 
     // UNIQUE 제약 위반 등 (예: 동일 game_id+seat_id 중복 생성)
