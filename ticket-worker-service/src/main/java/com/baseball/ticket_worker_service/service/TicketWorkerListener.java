@@ -30,15 +30,16 @@ public class TicketWorkerListener {
             Reservation reservation = reservationRepository.findById(message.getReservationId())
                     .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 예약입니다. ID: " + message.getReservationId()));
 
-            // 3. 멱등성 검증 (이미 확정된 예약이면 중복 처리 방지)
-            if (reservation.getStatus() == Reservation.ReservationStatus.CONFIRMED) {
-                log.warn("이미 확정된 예약입니다. 중복 메시지 무시. reservationId={}", message.getReservationId());
+            // 3. 멱등성 검증 (이미 확정/취소된 예약이면 중복 처리 방지)
+            if (reservation.getStatus() != Reservation.ReservationStatus.PENDING) {
+                log.warn("PENDING이 아닌 예약입니다. 메시지 무시. reservationId={}, status={}", 
+                    message.getReservationId(), reservation.getStatus());
                 return; 
             }
 
-            // 4. 예매 상태 확정 (PENDING -> CONFIRMED)
-            reservation.confirm();
-            log.info("예매 최종 확정 완료: reservationId={}, userId={}", message.getReservationId(), message.getUserId());
+            // 4. 좌석 유효성 검증 완료 로그 (확정은 사용자가 직접 수행)
+            log.info("예매 요청 검증 완료 (사용자 확정 대기): reservationId={}, userId={}", 
+                message.getReservationId(), message.getUserId());
 
         } catch (Exception e) {
             log.error("메시지 처리 중 에러 발생: {}", e.getMessage(), e);
