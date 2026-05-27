@@ -36,6 +36,16 @@ public class GameSeat {
     private LocalDateTime updatedAt;
 
     public enum GameSeatStatus {
-        AVAILABLE, SOLD, BLOCKED
+        AVAILABLE, SOLD, BLOCKED, LOCKED
+    }
+
+    public void markSold() {
+        this.status = GameSeatStatus.SOLD;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void markAvailable() {
+        this.status = GameSeatStatus.AVAILABLE;
+        this.updatedAt = LocalDateTime.now();
     }
 }

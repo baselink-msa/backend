@@ -1,6 +1,8 @@
 package com.baseball.ticket_service.service;
 
+import com.baseball.ticket_service.entity.GameSeat;
 import com.baseball.ticket_service.entity.Reservation;
+import com.baseball.ticket_service.repository.GameSeatRepository;
 import com.baseball.ticket_service.repository.ReservationRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.awspring.cloud.sqs.operations.SqsTemplate;
@@ -20,6 +22,7 @@ import java.util.Map;
 public class TicketService {
 
     private final ReservationRepository reservationRepository;
+    private final GameSeatRepository gameSeatRepository;
     private final SqsTemplate sqsTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -90,7 +93,13 @@ public class TicketService {
             throw new IllegalStateException("PENDING 상태의 예매만 확정할 수 있습니다. 현재: " + reservation.getStatus());
         }
         reservation.confirm();
-        return reservationRepository.save(reservation);
+        reservationRepository.save(reservation);
+
+        // game_seats 상태를 SOLD로 변경
+        gameSeatRepository.findByGameIdAndSeatId(reservation.getGameId(), reservation.getSeatId())
+                .ifPresent(GameSeat::markSold);
+
+        return reservation;
     }
 
     /**
@@ -107,7 +116,13 @@ public class TicketService {
             throw new IllegalStateException("이미 취소된 예매입니다.");
         }
         reservation.cancel();
-        return reservationRepository.save(reservation);
+        reservationRepository.save(reservation);
+
+        // game_seats 상태를 AVAILABLE로 복구
+        gameSeatRepository.findByGameIdAndSeatId(reservation.getGameId(), reservation.getSeatId())
+                .ifPresent(GameSeat::markAvailable);
+
+        return reservation;
     }
 
     /**
