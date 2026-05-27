@@ -350,7 +350,37 @@ public class AdminService {
                 .location(req.location())
                 .capacity(req.capacity())
                 .build());
-        return Map.<String, Object>of("stadiumId", stadium.getStadiumId());
+
+        // 기본 좌석 구역 5개 자동 생성
+        String[][] defaultSections = {
+                {"1루 내야석", "50000"},
+                {"3루 내야석", "50000"},
+                {"중앙 테이블석", "80000"},
+                {"외야석", "20000"},
+                {"응원석", "15000"},
+        };
+        for (String[] sec : defaultSections) {
+            SeatSection section = seatSectionRepository.save(SeatSection.builder()
+                    .stadiumId(stadium.getStadiumId())
+                    .sectionName(sec[0])
+                    .price(Integer.parseInt(sec[1]))
+                    .build());
+
+            // 구역당 4열 x 10번 = 40석 자동 생성
+            String[] rows = {"A", "B", "C", "D"};
+            for (String row : rows) {
+                for (int num = 1; num <= 10; num++) {
+                    seatRepository.save(Seat.builder()
+                            .stadiumId(stadium.getStadiumId())
+                            .sectionId(section.getSectionId())
+                            .seatRow(row)
+                            .seatNumber(String.valueOf(num))
+                            .build());
+                }
+            }
+        }
+
+        return Map.<String, Object>of("stadiumId", stadium.getStadiumId(), "seatsCreated", 200);
     }
 
     @Transactional
