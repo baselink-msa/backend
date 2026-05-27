@@ -2,13 +2,13 @@ package com.baseball.admin.domain;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
-// 구장은 시드 데이터로 제공 → admin-service에서는 존재 검증용 읽기 전용
 @Entity
 @Table(name = "stadiums", schema = "game_schema")
 @Getter
@@ -26,4 +26,17 @@ public class Stadium {
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
+
+    @Builder
+    private Stadium(String name, String location, Integer capacity) {
+        this.name = name;
+        this.location = location;
+        this.capacity = capacity;
+    }
+
+    public void update(String name, String location, Integer capacity) {
+        this.name = name;
+        this.location = location;
+        this.capacity = capacity;
+    }
 }
