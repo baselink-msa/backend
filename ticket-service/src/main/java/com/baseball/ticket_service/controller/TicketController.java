@@ -40,4 +40,20 @@ public class TicketController {
         List<Reservation> reservations = ticketService.getMyReservations(userId);
         return ResponseEntity.ok(reservations);
     }
+
+    @PostMapping("/{reservationId}/confirm")
+    public ResponseEntity<Reservation> confirmReservation(
+            @PathVariable Long reservationId,
+            @RequestHeader(value = "X-User-Id", defaultValue = "100") Long userId) {
+        Reservation reservation = ticketService.confirmReservation(reservationId, userId);
+        return ResponseEntity.ok(reservation);
+    }
+
+    @PostMapping("/{reservationId}/cancel")
+    public ResponseEntity<Reservation> cancelReservation(
+            @PathVariable Long reservationId,
+            @RequestHeader(value = "X-User-Id", defaultValue = "100") Long userId) {
+        Reservation reservation = ticketService.cancelReservation(reservationId, userId);
+        return ResponseEntity.ok(reservation);
+    }
 }

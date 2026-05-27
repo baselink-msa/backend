@@ -40,7 +40,22 @@ public class AdminService {
                 .ticketOpenTime(req.ticketOpenTime())
                 .status(GameStatus.SCHEDULED)
                 .build());
-        return Map.<String, Object>of("gameId", game.getGameId(), "status", game.getStatus().name());
+
+        // 해당 구장의 좌석을 자동으로 game_seats에 연결
+        List<Seat> seats = seatRepository.findByStadiumId(req.stadiumId());
+        List<GameSeat> gameSeats = seats.stream().map(seat -> {
+            SeatSection section = seatSectionRepository.findById(seat.getSectionId()).orElse(null);
+            int price = section != null ? section.getPrice() : 30000;
+            return GameSeat.builder()
+                    .gameId(game.getGameId())
+                    .seatId(seat.getSeatId())
+                    .status(GameSeatStatus.AVAILABLE)
+                    .price(price)
+                    .build();
+        }).toList();
+        gameSeatRepository.saveAll(gameSeats);
+
+        return Map.<String, Object>of("gameId", game.getGameId(), "status", game.getStatus().name(), "seatsCreated", gameSeats.size());
     }
 
     @Transactional

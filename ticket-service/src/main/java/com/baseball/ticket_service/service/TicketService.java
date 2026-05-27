@@ -77,6 +77,40 @@ public class TicketService {
     }
 
     /**
+     * 예매 확정 (사용자가 직접 확정 버튼을 누를 때)
+     */
+    @Transactional
+    public Reservation confirmReservation(Long reservationId, Long userId) {
+        Reservation reservation = reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new IllegalArgumentException("예매 정보를 찾을 수 없습니다. id=" + reservationId));
+        if (!reservation.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("본인의 예매만 확정할 수 있습니다.");
+        }
+        if (reservation.getStatus() != Reservation.ReservationStatus.PENDING) {
+            throw new IllegalStateException("PENDING 상태의 예매만 확정할 수 있습니다. 현재: " + reservation.getStatus());
+        }
+        reservation.confirm();
+        return reservationRepository.save(reservation);
+    }
+
+    /**
+     * 예매 취소
+     */
+    @Transactional
+    public Reservation cancelReservation(Long reservationId, Long userId) {
+        Reservation reservation = reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new IllegalArgumentException("예매 정보를 찾을 수 없습니다. id=" + reservationId));
+        if (!reservation.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("본인의 예매만 취소할 수 있습니다.");
+        }
+        if (reservation.getStatus() == Reservation.ReservationStatus.CANCELED) {
+            throw new IllegalStateException("이미 취소된 예매입니다.");
+        }
+        reservation.cancel();
+        return reservationRepository.save(reservation);
+    }
+
+    /**
      * SQS 메시지 발송 메서드
      */
     private void sendSqsMessage(Reservation savedReservation, Long userId, Long gameId, Long seatId, String lockId) {

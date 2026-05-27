@@ -46,4 +46,14 @@ public class Reservation {
     public enum ReservationStatus {
         PENDING, CONFIRMED, FAILED, CANCELED
     }
+
+    public void confirm() {
+        this.status = ReservationStatus.CONFIRMED;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public void cancel() {
+        this.status = ReservationStatus.CANCELED;
+        this.updatedAt = LocalDateTime.now();
+    }
 }
