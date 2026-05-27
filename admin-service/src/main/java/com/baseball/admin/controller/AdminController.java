@@ -176,11 +176,30 @@ public class AdminController {
         return ResponseEntity.noContent().build();
     }
 
-    // ==================== 구장 조회 ====================
+    // ==================== 구장 조회/등록/수정/삭제 ====================
 
     @GetMapping("/stadiums")
     public ApiResponse<List<Map<String, Object>>> getStadiums() {
         return ApiResponse.ok(adminService.getStadiums());
+    }
+
+    @PostMapping("/stadiums")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> createStadium(
+            @Valid @RequestBody CreateStadiumRequest request) {
+        return created(adminService.createStadium(request), "구장이 등록되었습니다.");
+    }
+
+    @PutMapping("/stadiums/{stadiumId}")
+    public ApiResponse<Map<String, Object>> updateStadium(
+            @PathVariable Long stadiumId,
+            @Valid @RequestBody CreateStadiumRequest request) {
+        return ApiResponse.ok(adminService.updateStadium(stadiumId, request), "구장이 수정되었습니다.");
+    }
+
+    @DeleteMapping("/stadiums/{stadiumId}")
+    public ResponseEntity<Void> deleteStadium(@PathVariable Long stadiumId) {
+        adminService.deleteStadium(stadiumId);
+        return ResponseEntity.noContent().build();
     }
 
     private ResponseEntity<ApiResponse<Map<String, Object>>> created(

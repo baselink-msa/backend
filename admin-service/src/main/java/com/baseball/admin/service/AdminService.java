@@ -343,4 +343,32 @@ public class AdminService {
         )).toList();
     }
 
+    @Transactional
+    public Map<String, Object> createStadium(CreateStadiumRequest req) {
+        Stadium stadium = stadiumRepository.save(Stadium.builder()
+                .name(req.name())
+                .location(req.location())
+                .capacity(req.capacity())
+                .build());
+        return Map.<String, Object>of("stadiumId", stadium.getStadiumId());
+    }
+
+    @Transactional
+    public Map<String, Object> updateStadium(Long stadiumId, CreateStadiumRequest req) {
+        Stadium stadium = stadiumRepository.findById(stadiumId)
+                .orElseThrow(() -> new BusinessException("STADIUM_NOT_FOUND", HttpStatus.NOT_FOUND,
+                        "구장을 찾을 수 없습니다. stadiumId=" + stadiumId));
+        stadium.update(req.name(), req.location(), req.capacity());
+        return Map.<String, Object>of("stadiumId", stadiumId);
+    }
+
+    @Transactional
+    public void deleteStadium(Long stadiumId) {
+        if (!stadiumRepository.existsById(stadiumId)) {
+            throw new BusinessException("STADIUM_NOT_FOUND", HttpStatus.NOT_FOUND,
+                    "구장을 찾을 수 없습니다. stadiumId=" + stadiumId);
+        }
+        stadiumRepository.deleteById(stadiumId);
+    }
+
 }
