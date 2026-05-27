@@ -6,5 +6,13 @@ spring:
     name: seat-lock-service
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/baseball_platform}
+    username: ${SPRING_DATASOURCE_USERNAME:baseball}
+    password: ${SPRING_DATASOURCE_PASSWORD:baseball}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
