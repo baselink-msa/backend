@@ -38,4 +38,8 @@ public class GameSeat {
         this.status = status;
         this.price = price;
     }
+
+    public void changePrice(Integer price) {
+        this.price = price;
+    }
 }

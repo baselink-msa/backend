@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/tickets")
 @RequiredArgsConstructor
@@ -24,5 +26,18 @@ public class TicketController {
         Reservation reservation = ticketService.requestReservation(userId, gameId, seatId, lockId);
         
         return ResponseEntity.ok(reservation);
+    }
+
+    @GetMapping("/{reservationId}")
+    public ResponseEntity<Reservation> getReservation(@PathVariable Long reservationId) {
+        Reservation reservation = ticketService.getReservation(reservationId);
+        return ResponseEntity.ok(reservation);
+    }
+
+    @GetMapping("/my")
+    public ResponseEntity<List<Reservation>> getMyReservations(
+            @RequestHeader(value = "X-User-Id", defaultValue = "100") Long userId) {
+        List<Reservation> reservations = ticketService.getMyReservations(userId);
+        return ResponseEntity.ok(reservations);
     }
 }

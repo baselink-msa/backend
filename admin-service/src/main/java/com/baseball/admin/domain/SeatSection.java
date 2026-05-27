@@ -33,4 +33,9 @@ public class SeatSection {
         this.sectionName = sectionName;
         this.price = price;
     }
+
+    public void update(String sectionName, Integer price) {
+        this.sectionName = sectionName;
+        this.price = price;
+    }
 }

@@ -167,13 +167,180 @@ public class AdminService {
                         "대기열 정책이 설정되지 않았습니다. gameId=" + gameId));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("gameId", gameId);
-        // 현재 대기 인원/입장 허용 수는 Redis에서 관리 → 파트 B 통합 시 연동.
-        // 로컬(파트 A 단독)에서는 0으로 반환한다.
         body.put("currentWaitingCount", 0);
         body.put("allowedCount", 0);
         body.put("maxEnterPerMinute", policy.getMaxEnterPerMinute());
         body.put("enabled", policy.getEnabled());
         return body;
+    }
+
+    // ==================== 경기 수정/상태 변경/삭제 ====================
+
+    @Transactional
+    public Map<String, Object> updateGame(Long gameId, CreateGameRequest req) {
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new BusinessException("GAME_NOT_FOUND", HttpStatus.NOT_FOUND,
+                        "경기를 찾을 수 없습니다. gameId=" + gameId));
+        game.update(req.homeTeamName(), req.awayTeamName(), req.stadiumId(),
+                req.gameStartTime(), req.ticketOpenTime());
+        return Map.<String, Object>of("gameId", gameId);
+    }
+
+    @Transactional
+    public Map<String, Object> changeGameStatus(Long gameId, String status) {
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new BusinessException("GAME_NOT_FOUND", HttpStatus.NOT_FOUND,
+                        "경기를 찾을 수 없습니다. gameId=" + gameId));
+        game.changeStatus(GameStatus.valueOf(status));
+        return Map.<String, Object>of("gameId", gameId, "status", status);
+    }
+
+    @Transactional
+    public void deleteGame(Long gameId) {
+        if (!gameRepository.existsById(gameId)) {
+            throw new BusinessException("GAME_NOT_FOUND", HttpStatus.NOT_FOUND,
+                    "경기를 찾을 수 없습니다. gameId=" + gameId);
+        }
+        gameSeatRepository.deleteByGameId(gameId);
+        gameRepository.deleteById(gameId);
+    }
+
+    // ==================== 좌석 구역 수정/삭제 ====================
+
+    @Transactional
+    public Map<String, Object> updateSeatSection(Long sectionId, CreateSeatSectionRequest req) {
+        SeatSection section = seatSectionRepository.findById(sectionId)
+                .orElseThrow(() -> new BusinessException("SECTION_NOT_FOUND", HttpStatus.NOT_FOUND,
+                        "좌석 구역을 찾을 수 없습니다. sectionId=" + sectionId));
+        section.update(req.sectionName(), req.price());
+        return Map.<String, Object>of("sectionId", sectionId);
+    }
+
+    @Transactional
+    public void deleteSeatSection(Long sectionId) {
+        if (!seatSectionRepository.existsById(sectionId)) {
+            throw new BusinessException("SECTION_NOT_FOUND", HttpStatus.NOT_FOUND,
+                    "좌석 구역을 찾을 수 없습니다. sectionId=" + sectionId);
+        }
+        seatSectionRepository.deleteById(sectionId);
+    }
+
+    // ==================== 좌석 조회/수정/삭제 ====================
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getSeats(Long stadiumId) {
+        List<Seat> seats = seatRepository.findByStadiumId(stadiumId);
+        return seats.stream().map(s -> Map.<String, Object>of(
+                "seatId", s.getSeatId(),
+                "stadiumId", s.getStadiumId(),
+                "sectionId", s.getSectionId(),
+                "seatRow", s.getSeatRow(),
+                "seatNumber", s.getSeatNumber()
+        )).toList();
+    }
+
+    @Transactional
+    public Map<String, Object> updateSeat(Long seatId, CreateSeatRequest req) {
+        Seat seat = seatRepository.findById(seatId)
+                .orElseThrow(() -> new BusinessException("SEAT_NOT_FOUND", HttpStatus.NOT_FOUND,
+                        "좌석을 찾을 수 없습니다. seatId=" + seatId));
+        seat.update(req.sectionId(), req.seatRow(), req.seatNumber());
+        return Map.<String, Object>of("seatId", seatId);
+    }
+
+    @Transactional
+    public void deleteSeat(Long seatId) {
+        if (!seatRepository.existsById(seatId)) {
+            throw new BusinessException("SEAT_NOT_FOUND", HttpStatus.NOT_FOUND,
+                    "좌석을 찾을 수 없습니다. seatId=" + seatId);
+        }
+        seatRepository.deleteById(seatId);
+    }
+
+    // ==================== 경기 좌석 조회/가격 변경/삭제 ====================
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getGameSeats(Long gameId) {
+        List<GameSeat> gameSeats = gameSeatRepository.findByGameId(gameId);
+        return gameSeats.stream().map(gs -> Map.<String, Object>of(
+                "gameSeatId", gs.getGameSeatId(),
+                "gameId", gs.getGameId(),
+                "seatId", gs.getSeatId(),
+                "status", gs.getStatus().name(),
+                "price", gs.getPrice()
+        )).toList();
+    }
+
+    @Transactional
+    public Map<String, Object> updateGameSeatPrice(Long gameSeatId, Integer price) {
+        GameSeat gameSeat = gameSeatRepository.findById(gameSeatId)
+                .orElseThrow(() -> new BusinessException("GAME_SEAT_NOT_FOUND", HttpStatus.NOT_FOUND,
+                        "경기 좌석을 찾을 수 없습니다. gameSeatId=" + gameSeatId));
+        gameSeat.changePrice(price);
+        return Map.<String, Object>of("gameSeatId", gameSeatId, "price", price);
+    }
+
+    @Transactional
+    public void deleteGameSeat(Long gameSeatId) {
+        if (!gameSeatRepository.existsById(gameSeatId)) {
+            throw new BusinessException("GAME_SEAT_NOT_FOUND", HttpStatus.NOT_FOUND,
+                    "경기 좌석을 찾을 수 없습니다. gameSeatId=" + gameSeatId);
+        }
+        gameSeatRepository.deleteById(gameSeatId);
+    }
+
+    // ==================== 메뉴 수정/삭제 ====================
+
+    @Transactional
+    public Map<String, Object> updateMenu(Long menuId, CreateMenuRequest req) {
+        AlcoholMenu menu = alcoholMenuRepository.findById(menuId)
+                .orElseThrow(() -> new BusinessException("MENU_NOT_FOUND", HttpStatus.NOT_FOUND,
+                        "메뉴를 찾을 수 없습니다. menuId=" + menuId));
+        boolean available = req.available() != null ? req.available() : true;
+        menu.update(req.name(), req.price(), available);
+        return Map.<String, Object>of("menuId", menuId);
+    }
+
+    @Transactional
+    public void deleteMenu(Long menuId) {
+        if (!alcoholMenuRepository.existsById(menuId)) {
+            throw new BusinessException("MENU_NOT_FOUND", HttpStatus.NOT_FOUND,
+                    "메뉴를 찾을 수 없습니다. menuId=" + menuId);
+        }
+        alcoholMenuRepository.deleteById(menuId);
+    }
+
+    // ==================== FAQ 수정/삭제 ====================
+
+    @Transactional
+    public Map<String, Object> updateFaq(Long faqId, CreateFaqRequest req) {
+        Faq faq = faqRepository.findById(faqId)
+                .orElseThrow(() -> new BusinessException("FAQ_NOT_FOUND", HttpStatus.NOT_FOUND,
+                        "FAQ를 찾을 수 없습니다. faqId=" + faqId));
+        boolean enabled = req.enabled() != null ? req.enabled() : true;
+        faq.update(req.category(), req.question(), req.answer(), enabled);
+        return Map.<String, Object>of("faqId", faqId);
+    }
+
+    @Transactional
+    public void deleteFaq(Long faqId) {
+        if (!faqRepository.existsById(faqId)) {
+            throw new BusinessException("FAQ_NOT_FOUND", HttpStatus.NOT_FOUND,
+                    "FAQ를 찾을 수 없습니다. faqId=" + faqId);
+        }
+        faqRepository.deleteById(faqId);
+    }
+
+    // ==================== 구장 등록/수정/삭제 ====================
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getStadiums() {
+        return stadiumRepository.findAll().stream().map(s -> Map.<String, Object>of(
+                "stadiumId", s.getStadiumId(),
+                "name", s.getName(),
+                "location", s.getLocation(),
+                "capacity", s.getCapacity()
+        )).toList();
     }
 
 }

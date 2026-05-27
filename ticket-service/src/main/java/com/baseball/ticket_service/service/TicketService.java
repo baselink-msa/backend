@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -56,6 +57,23 @@ public class TicketService {
                 .build();
 
         return reservationRepository.save(reservation);
+    }
+
+    /**
+     * 예매 상세 조회
+     */
+    @Transactional(readOnly = true)
+    public Reservation getReservation(Long reservationId) {
+        return reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new IllegalArgumentException("예매 정보를 찾을 수 없습니다. id=" + reservationId));
+    }
+
+    /**
+     * 내 예매 목록 조회
+     */
+    @Transactional(readOnly = true)
+    public List<Reservation> getMyReservations(Long userId) {
+        return reservationRepository.findByUserIdOrderByCreatedAtDesc(userId);
     }
 
     /**
