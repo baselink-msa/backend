@@ -35,4 +35,11 @@ public class Faq {
         this.answer = answer;
         this.enabled = enabled;
     }
+
+    public void update(String category, String question, String answer, Boolean enabled) {
+        this.category = category;
+        this.question = question;
+        this.answer = answer;
+        this.enabled = enabled;
+    }
 }

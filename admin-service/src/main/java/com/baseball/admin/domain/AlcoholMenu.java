@@ -33,4 +33,10 @@ public class AlcoholMenu {
         this.price = price;
         this.available = available;
     }
+
+    public void update(String name, Integer price, Boolean available) {
+        this.name = name;
+        this.price = price;
+        this.available = available;
+    }
 }

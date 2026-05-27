@@ -35,4 +35,10 @@ public class Seat {
         this.seatRow = seatRow;
         this.seatNumber = seatNumber;
     }
+
+    public void update(Long sectionId, String seatRow, String seatNumber) {
+        this.sectionId = sectionId;
+        this.seatRow = seatRow;
+        this.seatNumber = seatNumber;
+    }
 }

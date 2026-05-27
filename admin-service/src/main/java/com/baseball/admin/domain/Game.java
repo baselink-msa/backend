@@ -46,4 +46,17 @@ public class Game {
         this.ticketOpenTime = ticketOpenTime;
         this.status = status;
     }
+
+    public void update(String homeTeamName, String awayTeamName, Long stadiumId,
+                       LocalDateTime gameStartTime, LocalDateTime ticketOpenTime) {
+        this.homeTeamName = homeTeamName;
+        this.awayTeamName = awayTeamName;
+        this.stadiumId = stadiumId;
+        this.gameStartTime = gameStartTime;
+        this.ticketOpenTime = ticketOpenTime;
+    }
+
+    public void changeStatus(GameStatus status) {
+        this.status = status;
+    }
 }

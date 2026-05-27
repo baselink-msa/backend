@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -66,6 +67,120 @@ public class AdminController {
     @GetMapping("/waiting-room/games/{gameId}")
     public ApiResponse<Map<String, Object>> getWaitingRoomStatus(@PathVariable Long gameId) {
         return ApiResponse.ok(adminService.getWaitingRoomStatus(gameId));
+    }
+
+    // ==================== 경기 수정/상태 변경/삭제 ====================
+
+    @PutMapping("/games/{gameId}")
+    public ApiResponse<Map<String, Object>> updateGame(
+            @PathVariable Long gameId,
+            @Valid @RequestBody CreateGameRequest request) {
+        return ApiResponse.ok(adminService.updateGame(gameId, request), "경기가 수정되었습니다.");
+    }
+
+    @PatchMapping("/games/{gameId}/status")
+    public ApiResponse<Map<String, Object>> changeGameStatus(
+            @PathVariable Long gameId,
+            @RequestBody Map<String, String> body) {
+        return ApiResponse.ok(adminService.changeGameStatus(gameId, body.get("status")), "경기 상태가 변경되었습니다.");
+    }
+
+    @DeleteMapping("/games/{gameId}")
+    public ResponseEntity<Void> deleteGame(@PathVariable Long gameId) {
+        adminService.deleteGame(gameId);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ==================== 좌석 구역 수정/삭제 ====================
+
+    @PutMapping("/seat-sections/{sectionId}")
+    public ApiResponse<Map<String, Object>> updateSeatSection(
+            @PathVariable Long sectionId,
+            @Valid @RequestBody CreateSeatSectionRequest request) {
+        return ApiResponse.ok(adminService.updateSeatSection(sectionId, request), "좌석 구역이 수정되었습니다.");
+    }
+
+    @DeleteMapping("/seat-sections/{sectionId}")
+    public ResponseEntity<Void> deleteSeatSection(@PathVariable Long sectionId) {
+        adminService.deleteSeatSection(sectionId);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ==================== 좌석 조회/수정/삭제 ====================
+
+    @GetMapping("/seats")
+    public ApiResponse<List<Map<String, Object>>> getSeats(@RequestParam Long stadiumId) {
+        return ApiResponse.ok(adminService.getSeats(stadiumId));
+    }
+
+    @PutMapping("/seats/{seatId}")
+    public ApiResponse<Map<String, Object>> updateSeat(
+            @PathVariable Long seatId,
+            @Valid @RequestBody CreateSeatRequest request) {
+        return ApiResponse.ok(adminService.updateSeat(seatId, request), "좌석이 수정되었습니다.");
+    }
+
+    @DeleteMapping("/seats/{seatId}")
+    public ResponseEntity<Void> deleteSeat(@PathVariable Long seatId) {
+        adminService.deleteSeat(seatId);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ==================== 경기 좌석 조회/가격 변경/삭제 ====================
+
+    @GetMapping("/games/{gameId}/seats")
+    public ApiResponse<List<Map<String, Object>>> getGameSeats(@PathVariable Long gameId) {
+        return ApiResponse.ok(adminService.getGameSeats(gameId));
+    }
+
+    @PatchMapping("/game-seats/{gameSeatId}/price")
+    public ApiResponse<Map<String, Object>> updateGameSeatPrice(
+            @PathVariable Long gameSeatId,
+            @RequestBody Map<String, Integer> body) {
+        return ApiResponse.ok(adminService.updateGameSeatPrice(gameSeatId, body.get("price")), "가격이 변경되었습니다.");
+    }
+
+    @DeleteMapping("/game-seats/{gameSeatId}")
+    public ResponseEntity<Void> deleteGameSeat(@PathVariable Long gameSeatId) {
+        adminService.deleteGameSeat(gameSeatId);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ==================== 메뉴 수정/삭제 ====================
+
+    @PutMapping("/menus/{menuId}")
+    public ApiResponse<Map<String, Object>> updateMenu(
+            @PathVariable Long menuId,
+            @Valid @RequestBody CreateMenuRequest request) {
+        return ApiResponse.ok(adminService.updateMenu(menuId, request), "메뉴가 수정되었습니다.");
+    }
+
+    @DeleteMapping("/menus/{menuId}")
+    public ResponseEntity<Void> deleteMenu(@PathVariable Long menuId) {
+        adminService.deleteMenu(menuId);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ==================== FAQ 수정/삭제 ====================
+
+    @PutMapping("/faqs/{faqId}")
+    public ApiResponse<Map<String, Object>> updateFaq(
+            @PathVariable Long faqId,
+            @Valid @RequestBody CreateFaqRequest request) {
+        return ApiResponse.ok(adminService.updateFaq(faqId, request), "FAQ가 수정되었습니다.");
+    }
+
+    @DeleteMapping("/faqs/{faqId}")
+    public ResponseEntity<Void> deleteFaq(@PathVariable Long faqId) {
+        adminService.deleteFaq(faqId);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ==================== 구장 조회 ====================
+
+    @GetMapping("/stadiums")
+    public ApiResponse<List<Map<String, Object>>> getStadiums() {
+        return ApiResponse.ok(adminService.getStadiums());
     }
 
     private ResponseEntity<ApiResponse<Map<String, Object>>> created(
