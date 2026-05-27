@@ -30,13 +30,20 @@ jobs:
       - name: ECR 로그인
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: 도커 이미지 빌드 & ECR 푸시
         run: |
-          docker build \
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
             -f ./order-service/Dockerfile \
             -t ${{ env.ECR_REGISTRY }}/dev-order-service:${{ github.sha }} \
+            --push \
             ./order-service
-          docker push ${{ env.ECR_REGISTRY }}/dev-order-service:${{ github.sha }}
 
       - name: kustomize 설치
         if: github.ref == 'refs/heads/main'
