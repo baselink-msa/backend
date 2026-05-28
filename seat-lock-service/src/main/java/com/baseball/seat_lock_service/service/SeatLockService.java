@@ -29,6 +29,17 @@ public class SeatLockService {
         boolean isLocked = bucket.setIfAbsent(lockId, Duration.ofMinutes(5));
 
         if (!isLocked) {
+            gameSeatRepository.findByGameIdAndSeatId(gameId, seatId)
+                    .filter(gameSeat -> "AVAILABLE".equals(gameSeat.getStatus()))
+                    .ifPresent(gameSeat -> {
+                        bucket.delete();
+                        log.info("만료/취소 후 남은 Redis 좌석 잠금 정리: gameId={}, seatId={}", gameId, seatId);
+                    });
+
+            isLocked = bucket.setIfAbsent(lockId, Duration.ofMinutes(5));
+        }
+
+        if (!isLocked) {
             throw new IllegalStateException("이미 선점된 좌석입니다.");
         }
 
