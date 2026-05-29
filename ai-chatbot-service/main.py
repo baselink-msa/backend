@@ -20,14 +20,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-KNOWLEDGE_BASE_ID = os.getenv("KNOWLEDGE_BASE_ID", "")
-MODEL_ARN = "arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+# Bedrock Agent 설정
+AGENT_ID = os.getenv("BEDROCK_AGENT_ID", "PZBTYB3SFA")
+AGENT_ALIAS_ID = os.getenv("BEDROCK_AGENT_ALIAS_ID", "DICIJMBFXW")
+REGION = os.getenv("AWS_DEFAULT_REGION", os.getenv("AWS_REGION", "ap-northeast-2"))
 
 bedrock_agent_client = None
 try:
     bedrock_agent_client = boto3.client(
         service_name='bedrock-agent-runtime',
-        region_name=os.getenv("AWS_DEFAULT_REGION", os.getenv("AWS_REGION", "ap-northeast-2")),
+        region_name=REGION,
     )
 except Exception:
     pass
@@ -86,7 +88,7 @@ def get_faqs(category: Optional[str] = None):
 
 @app.post("/api/chatbot/messages")
 def ask_chatbot(request: ChatRequest):
-    """FAQ DB 매칭 → 없으면 Bedrock Knowledge Base로 답변"""
+    """FAQ DB 매칭 → 없으면 Bedrock Agent로 답변"""
     # 1. DB에서 FAQ 매칭 시도
     conn = get_db()
     try:
@@ -110,8 +112,8 @@ def ask_chatbot(request: ChatRequest):
             }
         }
 
-    # 2. Bedrock Knowledge Base 호출
-    if not bedrock_agent_client or not KNOWLEDGE_BASE_ID:
+    # 2. Bedrock Agent 호출 (Agent가 Knowledge Base + Guardrail 통합 처리)
+    if not bedrock_agent_client or not AGENT_ID:
         return {
             "success": True,
             "data": {
@@ -122,27 +124,30 @@ def ask_chatbot(request: ChatRequest):
         }
 
     try:
-        response = bedrock_agent_client.retrieve_and_generate(
-            input={"text": f"한국어로 답해줘. 야구나 구장, 주문 관련 질문이 아니면 '죄송합니다. 야구 및 구장 관련 질문만 답변 가능합니다.' 라고 해줘. 질문: {request.message}"},
-            retrieveAndGenerateConfiguration={
-                "type": "KNOWLEDGE_BASE",
-                "knowledgeBaseConfiguration": {
-                    "knowledgeBaseId": KNOWLEDGE_BASE_ID,
-                    "modelArn": MODEL_ARN,
-                    "retrievalConfiguration": {
-                        "vectorSearchConfiguration": {
-                            "numberOfResults": 3
-                        }
-                    }
-                }
-            }
+        response = bedrock_agent_client.invoke_agent(
+            agentId=AGENT_ID,
+            agentAliasId=AGENT_ALIAS_ID,
+            sessionId=os.urandom(16).hex(),
+            inputText=request.message,
         )
-        ai_answer = response["output"]["text"]
+
+        # Agent 응답 스트림 처리
+        answer_parts = []
+        for event in response["completion"]:
+            if "chunk" in event:
+                chunk_text = event["chunk"]["bytes"].decode("utf-8")
+                answer_parts.append(chunk_text)
+
+        ai_answer = "".join(answer_parts)
+
+        if not ai_answer.strip():
+            ai_answer = "죄송합니다. 답변을 생성하지 못했습니다. 다시 시도해 주세요."
+
         return {
             "success": True,
             "data": {
                 "answer": ai_answer,
-                "source": "AWS Bedrock Knowledge Base",
+                "source": "AWS Bedrock Agent",
                 "cached": False,
             }
         }
