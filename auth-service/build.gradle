@@ -6,7 +6,6 @@ dependencies {
 
     // Flyway — 서비스 시작 시 DB 마이그레이션 자동 실행
     implementation 'org.flywaydb:flyway-core'
-    implementation 'org.flywaydb:flyway-database-postgresql'
 
     implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
