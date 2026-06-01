@@ -16,6 +16,11 @@ spring:
     properties:
       hibernate:
         format_sql: true
+  flyway:
+    enabled: true
+    schemas: auth_schema,game_schema,ticket_schema,order_schema,chatbot_schema
+    locations: classpath:db/migration
+    baseline-on-migrate: true
 
 app:
   jwt:
