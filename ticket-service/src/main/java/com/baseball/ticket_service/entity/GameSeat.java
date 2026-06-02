@@ -3,7 +3,6 @@ package com.baseball.ticket_service.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -30,7 +29,7 @@ public class GameSeat {
     private GameSeatStatus status;
 
     @Column(name = "price", nullable = false)
-    private BigDecimal price;
+    private Integer price;
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
