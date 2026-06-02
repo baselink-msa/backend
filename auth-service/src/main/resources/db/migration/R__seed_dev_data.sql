@@ -50,6 +50,13 @@ INSERT INTO ticket_schema.waiting_room_policies (game_id, max_enter_per_minute, 
 (1, 100, 300, true, now(), now()), (2, 100, 300, true, now(), now())
 ON CONFLICT (game_id) DO UPDATE SET max_enter_per_minute=EXCLUDED.max_enter_per_minute, token_ttl_seconds=EXCLUDED.token_ttl_seconds, enabled=EXCLUDED.enabled, updated_at=now();
 
+-- KEDA 사전 확장 스케줄
+INSERT INTO ticket_schema.ticket_open_schedule (game_id, open_at, status, created_at, updated_at)
+SELECT game_id, ticket_open_time, 'scheduled', now(), now()
+FROM game_schema.games
+ON CONFLICT (game_id) DO UPDATE
+SET open_at=EXCLUDED.open_at, status=EXCLUDED.status, updated_at=now();
+
 -- 메뉴
 INSERT INTO order_schema.alcohol_menus (menu_id, name, price, available, created_at) VALUES
 (1, '생맥주 500ml', 6000, true, now()), (2, '캔맥주 355ml', 5000, true, now()), (3, '하이볼', 8000, true, now()),
