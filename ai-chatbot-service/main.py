@@ -22,7 +22,7 @@ app.add_middleware(
 
 # Bedrock Agent 설정
 AGENT_ID = os.getenv("BEDROCK_AGENT_ID", "PZBTYB3SFA")
-AGENT_ALIAS_ID = os.getenv("BEDROCK_AGENT_ALIAS_ID", "DICIJMBFXW")
+AGENT_ALIAS_ID = os.getenv("BEDROCK_AGENT_ALIAS_ID", "PZJI9ZGBIQ")
 REGION = os.getenv("AWS_DEFAULT_REGION", os.getenv("AWS_REGION", "ap-northeast-2"))
 
 bedrock_agent_client = None
