@@ -9,4 +9,8 @@ dependencies {
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
 
     runtimeOnly 'org.postgresql:postgresql'
+
+    // 프로메테우스 메트릭 수집을 위한 Actuator 및 Micrometer
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
 }

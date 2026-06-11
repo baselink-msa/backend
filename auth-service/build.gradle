@@ -14,4 +14,8 @@ dependencies {
     runtimeOnly 'org.postgresql:postgresql'
 
     testImplementation 'org.springframework.security:spring-security-test'
+
+    // 프로메테우스 메트릭 수집을 위한 Actuator 및 Micrometer
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
 }
