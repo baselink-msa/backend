@@ -16,3 +16,15 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

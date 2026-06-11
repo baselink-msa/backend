@@ -28,3 +28,15 @@ spring:
         static: ap-northeast-2
       sqs:
         endpoint: ${SPRING_CLOUD_AWS_SQS_ENDPOINT:http://localhost:9324}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

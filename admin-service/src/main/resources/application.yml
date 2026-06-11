@@ -24,3 +24,15 @@ app:
 logging:
   level:
     com.baseball.admin: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
