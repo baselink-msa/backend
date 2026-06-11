@@ -25,3 +25,15 @@ spring:
         static: ap-northeast-2
       sqs:
         endpoint: ${SPRING_CLOUD_AWS_SQS_ENDPOINT:http://localhost:9324}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus # 헬스체크와 프로메테우스 엔드포인트 개방
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name} # 나중에 그라파나에서 서비스별로 필터링하기 위한 태그
