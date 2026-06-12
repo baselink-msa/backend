@@ -1,11 +1,13 @@
 import os
+import time
 
 import psycopg2
 import psycopg2.extras
 import boto3
 from botocore.exceptions import NoCredentialsError
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram
 from pydantic import BaseModel
 from typing import Optional
 
@@ -19,6 +21,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Prometheus 메트릭 정의
+REQUEST_COUNT = Counter(
+    'http_requests_total',
+    'Total HTTP requests',
+    ['method', 'endpoint', 'status']
+)
+REQUEST_LATENCY = Histogram(
+    'http_request_duration_seconds',
+    'HTTP request latency',
+    ['endpoint']
+)
+
+@app.middleware("http")
+async def metrics_middleware(request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration = time.time() - start
+    REQUEST_COUNT.labels(request.method, request.url.path, response.status_code).inc()
+    REQUEST_LATENCY.labels(request.url.path).observe(duration)
+    return response
+
+@app.get("/actuator/prometheus")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 # Bedrock Agent 설정
 AGENT_ID = os.getenv("BEDROCK_AGENT_ID", "PZBTYB3SFA")
@@ -89,7 +116,6 @@ def get_faqs(category: Optional[str] = None):
 @app.post("/api/chatbot/messages")
 def ask_chatbot(request: ChatRequest):
     """FAQ DB 매칭 → 없으면 Bedrock Agent로 답변"""
-    # 1. DB에서 FAQ 매칭 시도
     conn = get_db()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -112,7 +138,6 @@ def ask_chatbot(request: ChatRequest):
             }
         }
 
-    # 2. Bedrock Agent 호출 (Agent가 Knowledge Base + Guardrail 통합 처리)
     if not bedrock_agent_client or not AGENT_ID:
         return {
             "success": True,
@@ -131,7 +156,6 @@ def ask_chatbot(request: ChatRequest):
             inputText=request.message,
         )
 
-        # Agent 응답 스트림 처리
         answer_parts = []
         for event in response["completion"]:
             if "chunk" in event:

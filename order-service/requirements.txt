@@ -3,3 +3,4 @@ uvicorn
 pydantic
 redis
 psycopg2-binary
+prometheus-client

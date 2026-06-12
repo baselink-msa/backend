@@ -1,9 +1,11 @@
 import os
+import time
 from contextlib import asynccontextmanager
 
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Response
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -11,7 +13,6 @@ from typing import List, Optional
 def get_db():
     """RDS 연결. 환경변수에서 접속 정보를 가져온다."""
     dsn_url = os.getenv("SPRING_DATASOURCE_URL", "")
-    # jdbc:postgresql://host:port/db -> host:port/db
     host_part = dsn_url.replace("jdbc:postgresql://", "")
     host_port, db_name = host_part.rsplit("/", 1) if "/" in host_part else (host_part, "baseball_platform")
     host, port = host_port.split(":") if ":" in host_port else (host_port, "5432")
@@ -63,6 +64,31 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(title="Order Service", description="주류 주문 및 상태 관리 API", lifespan=lifespan)
 
+# Prometheus 메트릭 정의
+REQUEST_COUNT = Counter(
+    'http_requests_total',
+    'Total HTTP requests',
+    ['method', 'endpoint', 'status']
+)
+REQUEST_LATENCY = Histogram(
+    'http_request_duration_seconds',
+    'HTTP request latency',
+    ['endpoint']
+)
+
+@app.middleware("http")
+async def metrics_middleware(request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration = time.time() - start
+    REQUEST_COUNT.labels(request.method, request.url.path, response.status_code).inc()
+    REQUEST_LATENCY.labels(request.url.path).observe(duration)
+    return response
+
+@app.get("/actuator/prometheus")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 
 # --- Pydantic 모델 ---
 class OrderItem(BaseModel):
@@ -111,7 +137,6 @@ def create_order(request: OrderRequest, x_user_id: Optional[str] = Header(None, 
     conn = get_db()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # 메뉴 가격 조회
             menu_ids = [item.menuId for item in request.items]
             cur.execute(
                 "SELECT menu_id, name, price FROM order_schema.alcohol_menus WHERE menu_id = ANY(%s)",
@@ -133,7 +158,6 @@ def create_order(request: OrderRequest, x_user_id: Optional[str] = Header(None, 
                     "price": menu["price"],
                 })
 
-            # 주문 저장
             cur.execute("""
                 INSERT INTO order_schema.orders (user_id, game_id, seat_id, status, total_price)
                 VALUES (%s, %s, %s, 'ORDERED', %s)
@@ -141,7 +165,6 @@ def create_order(request: OrderRequest, x_user_id: Optional[str] = Header(None, 
             """, (user_id, request.gameId, request.seatId, total_price))
             order_row = cur.fetchone()
 
-            # 주문 아이템 저장
             for detail in order_items_detail:
                 cur.execute("""
                     INSERT INTO order_schema.order_items (order_id, menu_id, menu_name, quantity, price)
@@ -182,7 +205,6 @@ def get_my_orders(x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
                     FROM order_schema.orders ORDER BY created_at DESC LIMIT 50
                 """)
             orders = cur.fetchall()
-        # datetime -> string
         for o in orders:
             if o.get("createdAt"):
                 o["createdAt"] = o["createdAt"].isoformat()
