@@ -38,4 +38,10 @@ public class AuthController {
     public ApiResponse<UserResponse> getMe(@AuthenticationPrincipal Long userId) {
         return ApiResponse.ok(authService.getMe(userId));
     }
+
+    @DeleteMapping("/me")
+    public ResponseEntity<Void> withdraw(@AuthenticationPrincipal Long userId) {
+        authService.withdraw(userId);
+        return ResponseEntity.noContent().build();
+    }
 }
