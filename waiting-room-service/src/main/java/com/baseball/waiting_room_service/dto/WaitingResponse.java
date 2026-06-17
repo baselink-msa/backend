@@ -12,5 +12,13 @@ public class WaitingResponse {
     private Long position;
     private Long peopleAhead;
     private Long estimatedWaitSeconds;
+    private Long serverTimeEpochMillis;
+    private Integer nextCheckAfterSeconds;
+    private Integer policyMaxEnterPerMinute;
+    private Integer currentReadyPodCount;
+    private Integer projectedReadyPodCount;
+    private Integer effectiveEnterPerMinute;
+    private Integer projectedEnterPerMinute;
+    private Long currentMinuteRemainingSlots;
     private boolean canEnter;
 }

@@ -23,6 +23,9 @@ app:
       fallback-ready-pods: ${WAITING_ROOM_TICKET_SERVICE_FALLBACK_READY_PODS:1}
       kubernetes-enabled: ${WAITING_ROOM_KUBERNETES_CAPACITY_ENABLED:true}
       cache-ttl-ms: ${WAITING_ROOM_CAPACITY_CACHE_TTL_MS:5000}
+      max-ticket-service-pods: ${WAITING_ROOM_TICKET_SERVICE_MAX_PODS:10}
+      scale-target-waiting-users-per-pod: ${WAITING_ROOM_SCALE_TARGET_WAITING_USERS_PER_POD:20}
+      scale-warmup-seconds: ${WAITING_ROOM_SCALE_WARMUP_SECONDS:60}
 
 management:
   endpoints:

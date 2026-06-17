@@ -70,6 +70,15 @@ public class WaitingRoomService {
     @Value("${app.waiting-room.admission.cache-ttl-ms:5000}")
     private long capacityCacheTtlMs;
 
+    @Value("${app.waiting-room.admission.max-ticket-service-pods:10}")
+    private int maxTicketServicePods;
+
+    @Value("${app.waiting-room.admission.scale-target-waiting-users-per-pod:20}")
+    private int scaleTargetWaitingUsersPerPod;
+
+    @Value("${app.waiting-room.admission.scale-warmup-seconds:60}")
+    private int scaleWarmupSeconds;
+
     @Value("${app.waiting-room.queue.stale-entry-ttl-ms:600000}")
     private long staleQueueEntryTtlMs;
 
@@ -200,8 +209,112 @@ public class WaitingRoomService {
 
         int policyLimit = Math.max(1, policy.maxEnterPerMinute());
         int readyPodCount = getTicketServiceReadyPodCount();
-        int serviceCapacity = readyPodCount <= 0 ? 0 : readyPodCount * Math.max(1, capacityPerPodPerMinute);
-        return Math.min(policyLimit, serviceCapacity);
+        return calculateEnterPerMinute(policyLimit, readyPodCount);
+    }
+
+    public AdmissionDecision evaluateAdmission(Long gameId, Long rank, WaitingRoomPolicy policy) {
+        long nowMillis = Instant.now().toEpochMilli();
+        if (!policy.enabled()) {
+            return new AdmissionDecision(
+                    rank != null && rank > 0,
+                    rank != null && rank > 0,
+                    true,
+                    0L,
+                    nowMillis,
+                    1,
+                    Integer.MAX_VALUE,
+                    getTicketServiceReadyPodCount(),
+                    getTicketServiceReadyPodCount(),
+                    Integer.MAX_VALUE,
+                    Integer.MAX_VALUE,
+                    Long.MAX_VALUE);
+        }
+
+        int policyLimit = Math.max(1, policy.maxEnterPerMinute());
+        int readyPodCount = getTicketServiceReadyPodCount();
+        int projectedPodCount = getProjectedTicketServicePodCount(gameId, readyPodCount);
+        int currentCapacityPerMinute = calculateEnterPerMinute(policyLimit, readyPodCount);
+        int projectedCapacityPerMinute = calculateEnterPerMinute(policyLimit, projectedPodCount);
+        long currentMinuteRemainingSlots = getCurrentMinuteRemainingSlots(gameId, currentCapacityPerMinute);
+        boolean rankAllowed = rank != null && rank > 0 && rank <= currentCapacityPerMinute;
+        boolean capacityAvailable = currentMinuteRemainingSlots > 0;
+        boolean canEnter = rank != null && rank > 0 && rank <= currentMinuteRemainingSlots;
+        long estimatedWaitSeconds = estimateWaitSeconds(
+                rank,
+                canEnter,
+                currentCapacityPerMinute,
+                projectedCapacityPerMinute,
+                currentMinuteRemainingSlots);
+        int nextCheckAfterSeconds = estimateNextCheckAfterSeconds(canEnter, estimatedWaitSeconds);
+
+        return new AdmissionDecision(
+                rankAllowed,
+                capacityAvailable,
+                canEnter,
+                estimatedWaitSeconds,
+                nowMillis,
+                nextCheckAfterSeconds,
+                policyLimit,
+                readyPodCount,
+                projectedPodCount,
+                currentCapacityPerMinute,
+                projectedCapacityPerMinute,
+                currentMinuteRemainingSlots);
+    }
+
+    private long estimateWaitSeconds(Long rank, boolean canEnter, int currentCapacityPerMinute,
+                                     int projectedCapacityPerMinute, long currentMinuteRemainingSlots) {
+        if (canEnter) {
+            return 0L;
+        }
+        if (rank == null || rank <= 0 || currentCapacityPerMinute <= 0) {
+            return 60L;
+        }
+
+        long peopleAhead = Math.max(0, rank - 1);
+        if (currentCapacityPerMinute <= 0) {
+            return 60L;
+        }
+
+        if (peopleAhead < currentMinuteRemainingSlots) {
+            return 0L;
+        }
+
+        long remainingAhead = peopleAhead - currentMinuteRemainingSlots;
+        long seconds = secondsUntilNextAdmissionWindow();
+        if (remainingAhead <= 0) {
+            return seconds;
+        }
+
+        if (projectedCapacityPerMinute <= currentCapacityPerMinute) {
+            return seconds + minutesToDrain(remainingAhead, currentCapacityPerMinute) * 60L;
+        }
+
+        long warmupSeconds = Math.max(0, scaleWarmupSeconds);
+        long minutesBeforeScale = warmupSeconds == 0 ? 0 : (long) Math.ceil(warmupSeconds / 60.0);
+        long handledBeforeScale = minutesBeforeScale * currentCapacityPerMinute;
+        if (remainingAhead <= handledBeforeScale) {
+            return seconds + minutesToDrain(remainingAhead, currentCapacityPerMinute) * 60L;
+        }
+
+        remainingAhead -= handledBeforeScale;
+        return seconds + minutesBeforeScale * 60L
+                + minutesToDrain(remainingAhead, projectedCapacityPerMinute) * 60L;
+    }
+
+    public record AdmissionDecision(
+            boolean rankAllowed,
+            boolean capacityAvailable,
+            boolean canEnter,
+            long estimatedWaitSeconds,
+            long serverTimeEpochMillis,
+            int nextCheckAfterSeconds,
+            int policyMaxEnterPerMinute,
+            int currentReadyPodCount,
+            int projectedReadyPodCount,
+            int effectiveEnterPerMinute,
+            int projectedEnterPerMinute,
+            long currentMinuteRemainingSlots) {
     }
 
     /**
@@ -269,6 +382,53 @@ public class WaitingRoomService {
     private String currentEntryCounterKey(Long gameId) {
         long epochMinute = Instant.now().getEpochSecond() / 60;
         return ENTRY_COUNTER_KEY_PREFIX + gameId + ":" + epochMinute;
+    }
+
+    private long getCurrentMinuteRemainingSlots(Long gameId, int currentCapacityPerMinute) {
+        String currentValue = redisTemplate.opsForValue().get(currentEntryCounterKey(gameId));
+        long currentCount = parseLongOrDefault(currentValue, 0L);
+        return Math.max(0L, currentCapacityPerMinute - currentCount);
+    }
+
+    private int calculateEnterPerMinute(int policyLimit, int podCount) {
+        int serviceCapacity = podCount <= 0 ? 0 : podCount * Math.max(1, capacityPerPodPerMinute);
+        return Math.min(Math.max(1, policyLimit), serviceCapacity);
+    }
+
+    private int getProjectedTicketServicePodCount(Long gameId, int currentReadyPodCount) {
+        long waitingCount = getWaitingQueueSize(gameId);
+        int demandBasedPodCount = (int) Math.ceil(
+                (double) waitingCount / Math.max(1, scaleTargetWaitingUsersPerPod));
+        return Math.min(
+                Math.max(1, maxTicketServicePods),
+                Math.max(currentReadyPodCount, demandBasedPodCount));
+    }
+
+    private long getWaitingQueueSize(Long gameId) {
+        Long size = redisTemplate.opsForZSet().zCard(queueKey(gameId));
+        return size == null ? 0L : size;
+    }
+
+    private long secondsUntilNextAdmissionWindow() {
+        long secondOfMinute = Instant.now().getEpochSecond() % 60;
+        return secondOfMinute == 0 ? 60L : 60L - secondOfMinute;
+    }
+
+    private long minutesToDrain(long waitingUsers, int capacityPerMinute) {
+        if (waitingUsers <= 0) {
+            return 0L;
+        }
+        return (long) Math.ceil((double) waitingUsers / Math.max(1, capacityPerMinute));
+    }
+
+    private int estimateNextCheckAfterSeconds(boolean canEnter, long estimatedWaitSeconds) {
+        if (canEnter || estimatedWaitSeconds <= 10) {
+            return 1;
+        }
+        if (estimatedWaitSeconds <= 60) {
+            return 2;
+        }
+        return 3;
     }
 
     private int getTicketServiceReadyPodCount() {

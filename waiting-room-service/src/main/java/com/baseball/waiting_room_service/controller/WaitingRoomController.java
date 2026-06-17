@@ -62,10 +62,17 @@ public class WaitingRoomController {
 
         Long rank = waitingRoomService.getWaitingPosition(gameId, userId);
         WaitingRoomPolicy policy = waitingRoomService.getWaitingRoomPolicy(gameId);
+        WaitingRoomService.AdmissionDecision admission =
+                waitingRoomService.evaluateAdmission(gameId, rank, policy);
 
-        if (!waitingRoomService.isRankAllowed(rank, policy)) {
+        if (!admission.rankAllowed()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(new ApiResponse<>(false, null, "아직 입장 순서가 아닙니다."));
+        }
+
+        if (!admission.canEnter()) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(new ApiResponse<>(false, null, "앞 순번 처리 중입니다. 다음 입장 가능 시간에 다시 시도해 주세요."));
         }
 
         if (!waitingRoomService.consumeEntrySlot(gameId, policy)) {
@@ -89,38 +96,25 @@ public class WaitingRoomController {
     // 응답 객체 생성 공통 메서드
     private WaitingResponse buildWaitingResponse(Long gameId, Long userId, Long rank, WaitingRoomPolicy policy) {
         long peopleAhead = Math.max(0, rank - 1);
-        boolean rankAllowed = waitingRoomService.isRankAllowed(rank, policy);
-        boolean capacityAvailable = waitingRoomService.hasEntryCapacity(gameId, policy);
-        boolean canEnter = rankAllowed && capacityAvailable;
-        long estimatedWaitSeconds = estimateWaitSeconds(rank, canEnter, rankAllowed, capacityAvailable, policy);
+        WaitingRoomService.AdmissionDecision admission =
+                waitingRoomService.evaluateAdmission(gameId, rank, policy);
 
         return WaitingResponse.builder()
                 .gameId(gameId)
                 .userId(userId)
-                .status(canEnter ? "ALLOWED" : "WAITING")
+                .status(admission.canEnter() ? "ALLOWED" : "WAITING")
                 .position(rank)
                 .peopleAhead(peopleAhead)
-                .estimatedWaitSeconds(estimatedWaitSeconds)
-                .canEnter(canEnter)
+                .estimatedWaitSeconds(admission.estimatedWaitSeconds())
+                .serverTimeEpochMillis(admission.serverTimeEpochMillis())
+                .nextCheckAfterSeconds(admission.nextCheckAfterSeconds())
+                .policyMaxEnterPerMinute(admission.policyMaxEnterPerMinute())
+                .currentReadyPodCount(admission.currentReadyPodCount())
+                .projectedReadyPodCount(admission.projectedReadyPodCount())
+                .effectiveEnterPerMinute(admission.effectiveEnterPerMinute())
+                .projectedEnterPerMinute(admission.projectedEnterPerMinute())
+                .currentMinuteRemainingSlots(admission.currentMinuteRemainingSlots())
+                .canEnter(admission.canEnter())
                 .build();
-    }
-
-    private long estimateWaitSeconds(Long rank, boolean canEnter, boolean rankAllowed,
-                                     boolean capacityAvailable, WaitingRoomPolicy policy) {
-        if (canEnter || !policy.enabled()) {
-            return 0L;
-        }
-
-        if (rankAllowed && !capacityAvailable) {
-            return 60L;
-        }
-
-        int effectiveEnterPerMinute = waitingRoomService.getEffectiveEnterPerMinute(policy);
-        if (effectiveEnterPerMinute <= 0) {
-            return 60L;
-        }
-
-        long overflowRank = Math.max(0, rank - effectiveEnterPerMinute);
-        return Math.max(60L, (long) Math.ceil((double) overflowRank / effectiveEnterPerMinute) * 60);
     }
 }

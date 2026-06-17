@@ -152,6 +152,30 @@ public class AdminService {
                 "enabled", enabled);
     }
 
+    @Transactional(readOnly = true)
+    public Map<String, Object> getWaitingRoomPolicy(Long gameId) {
+        if (!gameRepository.existsById(gameId)) {
+            throw new BusinessException("GAME_NOT_FOUND", HttpStatus.NOT_FOUND,
+                    "경기를 찾을 수 없습니다. gameId=" + gameId);
+        }
+
+        WaitingRoomPolicy policy = waitingRoomPolicyRepository.findByGameId(gameId)
+                .orElse(null);
+        int maxEnter = policy != null && policy.getMaxEnterPerMinute() != null
+                ? policy.getMaxEnterPerMinute()
+                : 100;
+        int ttl = policy != null && policy.getTokenTtlSeconds() != null
+                ? policy.getTokenTtlSeconds()
+                : 300;
+        boolean enabled = policy == null || policy.getEnabled() == null || policy.getEnabled();
+
+        return Map.<String, Object>of(
+                "gameId", gameId,
+                "maxEnterPerMinute", maxEnter,
+                "tokenTtlSeconds", ttl,
+                "enabled", enabled);
+    }
+
     @Transactional
     public Map<String, Object> createMenu(CreateMenuRequest req) {
         boolean available = req.available() != null ? req.available() : true;
@@ -185,6 +209,7 @@ public class AdminService {
         body.put("currentWaitingCount", 0);
         body.put("allowedCount", 0);
         body.put("maxEnterPerMinute", policy.getMaxEnterPerMinute());
+        body.put("tokenTtlSeconds", policy.getTokenTtlSeconds());
         body.put("enabled", policy.getEnabled());
         return body;
     }
