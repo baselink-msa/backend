@@ -15,6 +15,8 @@ spring:
 
 app:
   waiting-room:
+    queue:
+      stale-entry-ttl-ms: ${WAITING_ROOM_STALE_ENTRY_TTL_MS:600000}
     admission:
       ticket-service-name: ${WAITING_ROOM_TICKET_SERVICE_NAME:ticket-service}
       capacity-per-pod-per-minute: ${WAITING_ROOM_TICKET_SERVICE_CAPACITY_PER_POD_PER_MINUTE:20}
