@@ -6,6 +6,10 @@ dependencies {
     // 2. Redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
+    // 3. Waiting room policy lookup
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    runtimeOnly 'org.postgresql:postgresql'
+
     // 3. 편의 기능
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
