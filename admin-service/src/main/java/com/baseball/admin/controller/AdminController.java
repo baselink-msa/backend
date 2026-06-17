@@ -52,6 +52,12 @@ public class AdminController {
                 "대기열 정책이 저장되었습니다.");
     }
 
+    @GetMapping("/games/{gameId}/waiting-room-policy")
+    public ApiResponse<Map<String, Object>> getWaitingRoomPolicy(@PathVariable Long gameId) {
+        return ApiResponse.ok(adminService.getWaitingRoomPolicy(gameId),
+                "대기열 정책 조회 성공");
+    }
+
     @PostMapping("/menus")
     public ResponseEntity<ApiResponse<Map<String, Object>>> createMenu(
             @Valid @RequestBody CreateMenuRequest request) {
