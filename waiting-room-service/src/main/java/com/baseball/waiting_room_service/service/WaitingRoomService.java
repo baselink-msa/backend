@@ -28,7 +28,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 
@@ -44,10 +43,9 @@ public class WaitingRoomService {
     private static final String QUEUE_KEY_PREFIX = "waiting:";
     private static final String HEARTBEAT_KEY_PREFIX = "waiting:heartbeat:";
     private static final String TOKEN_KEY_PREFIX = "waiting:token:";
-    private static final String ENTRY_COUNTER_KEY_PREFIX = "waiting:entry:";
+    private static final String ACTIVE_TOKEN_KEY_PREFIX = "waiting:active:";
     private static final int DEFAULT_MAX_ENTER_PER_MINUTE = 100;
     private static final int DEFAULT_TOKEN_TTL_SECONDS = 300;
-    private static final int ENTRY_COUNTER_TTL_SECONDS = 90;
     private static final Path SERVICE_ACCOUNT_TOKEN =
             Path.of("/var/run/secrets/kubernetes.io/serviceaccount/token");
     private static final Path SERVICE_ACCOUNT_NAMESPACE =
@@ -85,22 +83,17 @@ public class WaitingRoomService {
     private volatile long readyPodCountCacheExpiresAt = 0L;
     private volatile int cachedReadyPodCount = 1;
 
-    private static final DefaultRedisScript<Long> CONSUME_ENTRY_SLOT_SCRIPT = new DefaultRedisScript<>("""
-            local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-            local max = tonumber(ARGV[1])
-            if current >= max then
+    private static final DefaultRedisScript<Long> ACQUIRE_ACTIVE_SLOT_SCRIPT = new DefaultRedisScript<>("""
+            redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, ARGV[1])
+            local active = redis.call('ZCARD', KEYS[1])
+            local capacity = tonumber(ARGV[2])
+            if active >= capacity then
                 return 0
             end
 
-            current = redis.call('INCR', KEYS[1])
-            if current == 1 then
-                redis.call('EXPIRE', KEYS[1], ARGV[2])
-            end
-
-            if current <= max then
-                return 1
-            end
-            return 0
+            redis.call('SET', KEYS[2], ARGV[5], 'EX', ARGV[6])
+            redis.call('ZADD', KEYS[1], ARGV[4], ARGV[3])
+            return 1
             """, Long.class);
 
     /**
@@ -178,28 +171,7 @@ public class WaitingRoomService {
             return false;
         }
 
-        String counterKey = currentEntryCounterKey(gameId);
-        String currentValue = redisTemplate.opsForValue().get(counterKey);
-        long currentCount = parseLongOrDefault(currentValue, 0L);
-        return currentCount < effectiveEnterPerMinute;
-    }
-
-    public boolean consumeEntrySlot(Long gameId, WaitingRoomPolicy policy) {
-        if (!policy.enabled()) {
-            return true;
-        }
-
-        int effectiveEnterPerMinute = getEffectiveEnterPerMinute(policy);
-        if (effectiveEnterPerMinute <= 0) {
-            return false;
-        }
-
-        Long consumed = redisTemplate.execute(
-                CONSUME_ENTRY_SLOT_SCRIPT,
-                List.of(currentEntryCounterKey(gameId)),
-                String.valueOf(effectiveEnterPerMinute),
-                String.valueOf(ENTRY_COUNTER_TTL_SECONDS));
-        return consumed != null && consumed == 1L;
+        return getActiveSessionRemainingSlots(gameId, effectiveEnterPerMinute) > 0;
     }
 
     public int getEffectiveEnterPerMinute(WaitingRoomPolicy policy) {
@@ -323,9 +295,22 @@ public class WaitingRoomService {
     public String issueAccessToken(Long gameId, Long userId, int tokenTtlSeconds) {
         String tokenId = UUID.randomUUID().toString();
         String tokenKey = TOKEN_KEY_PREFIX + tokenId;
-
-        // Redis SET EX: 정책에 설정된 시간 동안 유효한 입장 토큰 발급
-        redisTemplate.opsForValue().set(tokenKey, userId.toString(), tokenTtlSeconds, TimeUnit.SECONDS);
+        WaitingRoomPolicy policy = getWaitingRoomPolicy(gameId);
+        int effectiveEnterPerMinute = getEffectiveEnterPerMinute(policy);
+        long nowMillis = Instant.now().toEpochMilli();
+        long expiresAtMillis = nowMillis + tokenTtlSeconds * 1000L;
+        Long acquired = redisTemplate.execute(
+                ACQUIRE_ACTIVE_SLOT_SCRIPT,
+                List.of(activeTokenKey(gameId), tokenKey),
+                String.valueOf(nowMillis),
+                String.valueOf(effectiveEnterPerMinute),
+                tokenId,
+                String.valueOf(expiresAtMillis),
+                userId.toString(),
+                String.valueOf(tokenTtlSeconds));
+        if (acquired == null || acquired != 1L) {
+            return null;
+        }
         
         // 토큰을 발급받은 사용자는 대기열(ZSET)에서 제거
         String queueKey = queueKey(gameId);
@@ -336,12 +321,33 @@ public class WaitingRoomService {
         return tokenId;
     }
 
+    public boolean releaseAccessToken(Long gameId, Long userId, String tokenId) {
+        if (tokenId == null || tokenId.isBlank()) {
+            return false;
+        }
+
+        String tokenKey = TOKEN_KEY_PREFIX + tokenId;
+        String storedUserId = redisTemplate.opsForValue().get(tokenKey);
+        if (storedUserId != null && !storedUserId.equals(userId.toString())) {
+            return false;
+        }
+
+        redisTemplate.delete(tokenKey);
+        redisTemplate.opsForZSet().remove(activeTokenKey(gameId), tokenId);
+        log.info("좌석선택 세션 슬롯 반납: gameId={}, userId={}, tokenId={}", gameId, userId, tokenId);
+        return true;
+    }
+
     private String queueKey(Long gameId) {
         return QUEUE_KEY_PREFIX + gameId + ":queue";
     }
 
     private String heartbeatKey(Long gameId) {
         return HEARTBEAT_KEY_PREFIX + gameId + ":queue";
+    }
+
+    private String activeTokenKey(Long gameId) {
+        return ACTIVE_TOKEN_KEY_PREFIX + gameId + ":tokens";
     }
 
     private void pruneStaleQueueMembers(String queueKey, String heartbeatKey, long nowMillis) {
@@ -379,15 +385,18 @@ public class WaitingRoomService {
         log.info("만료된 대기열 사용자 정리: queueKey={}, count={}", queueKey, staleMembers.size());
     }
 
-    private String currentEntryCounterKey(Long gameId) {
-        long epochMinute = Instant.now().getEpochSecond() / 60;
-        return ENTRY_COUNTER_KEY_PREFIX + gameId + ":" + epochMinute;
+    private long getCurrentMinuteRemainingSlots(Long gameId, int currentCapacityPerMinute) {
+        return getActiveSessionRemainingSlots(gameId, currentCapacityPerMinute);
     }
 
-    private long getCurrentMinuteRemainingSlots(Long gameId, int currentCapacityPerMinute) {
-        String currentValue = redisTemplate.opsForValue().get(currentEntryCounterKey(gameId));
-        long currentCount = parseLongOrDefault(currentValue, 0L);
-        return Math.max(0L, currentCapacityPerMinute - currentCount);
+    private long getActiveSessionRemainingSlots(Long gameId, int capacity) {
+        pruneExpiredActiveSessions(gameId);
+        Long activeCount = redisTemplate.opsForZSet().zCard(activeTokenKey(gameId));
+        return Math.max(0L, capacity - (activeCount == null ? 0L : activeCount));
+    }
+
+    private void pruneExpiredActiveSessions(Long gameId) {
+        redisTemplate.opsForZSet().removeRangeByScore(activeTokenKey(gameId), 0, Instant.now().toEpochMilli());
     }
 
     private int calculateEnterPerMinute(int policyLimit, int podCount) {
