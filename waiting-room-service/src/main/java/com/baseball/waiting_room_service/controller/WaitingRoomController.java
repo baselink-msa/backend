@@ -10,6 +10,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/waiting-room/games")
 @RequiredArgsConstructor
@@ -75,13 +77,12 @@ public class WaitingRoomController {
                     .body(new ApiResponse<>(false, null, "앞 순번 처리 중입니다. 다음 입장 가능 시간에 다시 시도해 주세요."));
         }
 
-        if (!waitingRoomService.consumeEntrySlot(gameId, policy)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(new ApiResponse<>(false, null, "이번 분 입장 가능 인원이 모두 소진되었습니다."));
-        }
-
         if (rank > 0) {
             String token = waitingRoomService.issueAccessToken(gameId, userId, policy.tokenTtlSeconds());
+            if (token == null) {
+                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                        .body(new ApiResponse<>(false, null, "좌석 선택 가능 인원이 모두 사용 중입니다."));
+            }
             TokenResponse tokenResponse = TokenResponse.builder()
                     .ticketAccessToken(token)
                     .expiresIn((long) policy.tokenTtlSeconds())
@@ -91,6 +92,25 @@ public class WaitingRoomController {
 
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(new ApiResponse<>(false, null, "아직 입장 순서가 아닙니다."));
+    }
+
+    @PostMapping("/{gameId}/release-token")
+    public ResponseEntity<ApiResponse<?>> releaseToken(
+            @PathVariable("gameId") Long gameId,
+            @RequestHeader(value = "X-User-Id") Long userId,
+            @RequestBody Map<String, String> request) {
+
+        boolean released = waitingRoomService.releaseAccessToken(
+                gameId,
+                userId,
+                request.get("ticketAccessToken"));
+
+        if (!released) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiResponse<>(false, null, "반납할 좌석 선택 토큰을 찾을 수 없습니다."));
+        }
+
+        return ResponseEntity.ok(new ApiResponse<>(true, null, "좌석 선택 슬롯이 반납되었습니다."));
     }
 
     // 응답 객체 생성 공통 메서드
