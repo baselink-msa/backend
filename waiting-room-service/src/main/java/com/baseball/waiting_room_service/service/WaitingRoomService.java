@@ -24,7 +24,9 @@ import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import javax.net.ssl.SSLContext;
@@ -40,6 +42,7 @@ public class WaitingRoomService {
     private final ObjectMapper objectMapper;
 
     private static final String QUEUE_KEY_PREFIX = "waiting:";
+    private static final String HEARTBEAT_KEY_PREFIX = "waiting:heartbeat:";
     private static final String TOKEN_KEY_PREFIX = "waiting:token:";
     private static final String ENTRY_COUNTER_KEY_PREFIX = "waiting:entry:";
     private static final int DEFAULT_MAX_ENTER_PER_MINUTE = 100;
@@ -67,6 +70,9 @@ public class WaitingRoomService {
     @Value("${app.waiting-room.admission.cache-ttl-ms:5000}")
     private long capacityCacheTtlMs;
 
+    @Value("${app.waiting-room.queue.stale-entry-ttl-ms:600000}")
+    private long staleQueueEntryTtlMs;
+
     private volatile long readyPodCountCacheExpiresAt = 0L;
     private volatile int cachedReadyPodCount = 1;
 
@@ -92,11 +98,15 @@ public class WaitingRoomService {
      * 1. 대기열 진입 (Redis ZSET에 추가)
      */
     public Long enterWaitingRoom(Long gameId, Long userId) {
-        String queueKey = QUEUE_KEY_PREFIX + gameId + ":queue";
+        String queueKey = queueKey(gameId);
+        String heartbeatKey = heartbeatKey(gameId);
         long timestamp = Instant.now().toEpochMilli(); // 현재 시간을 Score로 사용
+
+        pruneStaleQueueMembers(queueKey, heartbeatKey, timestamp);
 
         // ZADD: 이미 대기열에 있다면 갱신하지 않음 (addIfAbsent)
         redisTemplate.opsForZSet().addIfAbsent(queueKey, userId.toString(), timestamp);
+        redisTemplate.opsForZSet().add(heartbeatKey, userId.toString(), timestamp);
 
         // ZRANK: 내 순번 조회 (0부터 시작하므로 +1)
         Long rank = redisTemplate.opsForZSet().rank(queueKey, userId.toString());
@@ -107,8 +117,14 @@ public class WaitingRoomService {
      * 2. 내 대기 순번 조회
      */
     public Long getWaitingPosition(Long gameId, Long userId) {
-        String queueKey = QUEUE_KEY_PREFIX + gameId + ":queue";
+        String queueKey = queueKey(gameId);
+        String heartbeatKey = heartbeatKey(gameId);
+        pruneStaleQueueMembers(queueKey, heartbeatKey, Instant.now().toEpochMilli());
+
         Long rank = redisTemplate.opsForZSet().rank(queueKey, userId.toString());
+        if (rank != null) {
+            redisTemplate.opsForZSet().add(heartbeatKey, userId.toString(), Instant.now().toEpochMilli());
+        }
         return (rank != null) ? rank + 1 : -1L;
     }
 
@@ -199,11 +215,55 @@ public class WaitingRoomService {
         redisTemplate.opsForValue().set(tokenKey, userId.toString(), tokenTtlSeconds, TimeUnit.SECONDS);
         
         // 토큰을 발급받은 사용자는 대기열(ZSET)에서 제거
-        String queueKey = QUEUE_KEY_PREFIX + gameId + ":queue";
+        String queueKey = queueKey(gameId);
         redisTemplate.opsForZSet().remove(queueKey, userId.toString());
+        redisTemplate.opsForZSet().remove(heartbeatKey(gameId), userId.toString());
 
         log.info("입장 토큰 발급 완료: gameId={}, userId={}, tokenId={}", gameId, userId, tokenId);
         return tokenId;
+    }
+
+    private String queueKey(Long gameId) {
+        return QUEUE_KEY_PREFIX + gameId + ":queue";
+    }
+
+    private String heartbeatKey(Long gameId) {
+        return HEARTBEAT_KEY_PREFIX + gameId + ":queue";
+    }
+
+    private void pruneStaleQueueMembers(String queueKey, String heartbeatKey, long nowMillis) {
+        if (staleQueueEntryTtlMs <= 0) {
+            return;
+        }
+
+        long cutoffMillis = nowMillis - staleQueueEntryTtlMs;
+        Set<String> staleMembers = new HashSet<>();
+
+        Set<String> staleHeartbeatMembers = redisTemplate.opsForZSet()
+                .rangeByScore(heartbeatKey, 0, cutoffMillis);
+        if (staleHeartbeatMembers != null) {
+            staleMembers.addAll(staleHeartbeatMembers);
+        }
+
+        // 이전 버전에서 heartbeat 없이 쌓인 대기열 데이터 정리.
+        Set<String> oldQueueMembers = redisTemplate.opsForZSet()
+                .rangeByScore(queueKey, 0, cutoffMillis);
+        if (oldQueueMembers != null) {
+            for (String member : oldQueueMembers) {
+                if (redisTemplate.opsForZSet().score(heartbeatKey, member) == null) {
+                    staleMembers.add(member);
+                }
+            }
+        }
+
+        if (staleMembers.isEmpty()) {
+            return;
+        }
+
+        Object[] members = staleMembers.toArray();
+        redisTemplate.opsForZSet().remove(queueKey, members);
+        redisTemplate.opsForZSet().remove(heartbeatKey, members);
+        log.info("만료된 대기열 사용자 정리: queueKey={}, count={}", queueKey, staleMembers.size());
     }
 
     private String currentEntryCounterKey(Long gameId) {
