@@ -50,8 +50,10 @@ public class WaitingRoomService {
     private static final String HEARTBEAT_KEY_PREFIX = "waiting:heartbeat:";
     private static final String TOKEN_KEY_PREFIX = "waiting:token:";
     private static final String ACTIVE_TOKEN_KEY_PREFIX = "waiting:active:";
+    private static final String ENTRY_COUNTER_KEY_PREFIX = "waiting:entry:";
     private static final int DEFAULT_MAX_ENTER_PER_MINUTE = 100;
     private static final int DEFAULT_TOKEN_TTL_SECONDS = 300;
+    private static final int ENTRY_COUNTER_TTL_SECONDS = 90;
     private static final Path SERVICE_ACCOUNT_TOKEN =
             Path.of("/var/run/secrets/kubernetes.io/serviceaccount/token");
     private static final Path SERVICE_ACCOUNT_NAMESPACE =
@@ -109,16 +111,25 @@ public class WaitingRoomService {
     private volatile long readyPodCountCacheExpiresAt = 0L;
     private volatile int cachedReadyPodCount = 1;
 
-    private static final DefaultRedisScript<Long> ACQUIRE_ACTIVE_SLOT_SCRIPT = new DefaultRedisScript<>("""
-            redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, ARGV[1])
-            local active = redis.call('ZCARD', KEYS[1])
+    private static final DefaultRedisScript<Long> ISSUE_TOKEN_SCRIPT = new DefaultRedisScript<>("""
+            local used = tonumber(redis.call('GET', KEYS[1]) or '0')
             local capacity = tonumber(ARGV[2])
-            if active >= capacity then
+            if used >= capacity then
                 return 0
             end
 
-            redis.call('SET', KEYS[2], ARGV[5], 'EX', ARGV[6])
-            redis.call('ZADD', KEYS[1], ARGV[4], ARGV[3])
+            local new_used = redis.call('INCR', KEYS[1])
+            if new_used == 1 then
+                redis.call('EXPIRE', KEYS[1], ARGV[7])
+            end
+            if new_used > capacity then
+                redis.call('DECR', KEYS[1])
+                return 0
+            end
+
+            redis.call('ZREMRANGEBYSCORE', KEYS[2], 0, ARGV[1])
+            redis.call('SET', KEYS[3], ARGV[5], 'EX', ARGV[6])
+            redis.call('ZADD', KEYS[2], ARGV[4], ARGV[3])
             return 1
             """, Long.class);
 
@@ -203,7 +214,7 @@ public class WaitingRoomService {
             return false;
         }
 
-        return getActiveSessionRemainingSlots(gameId, effectiveEnterPerMinute) > 0;
+        return getCurrentMinuteRemainingSlots(gameId, effectiveEnterPerMinute) > 0;
     }
 
     public int getEffectiveEnterPerMinute(WaitingRoomPolicy policy) {
@@ -332,14 +343,15 @@ public class WaitingRoomService {
         long nowMillis = Instant.now().toEpochMilli();
         long expiresAtMillis = nowMillis + tokenTtlSeconds * 1000L;
         Long acquired = redisTemplate.execute(
-                ACQUIRE_ACTIVE_SLOT_SCRIPT,
-                List.of(activeTokenKey(gameId), tokenKey),
+                ISSUE_TOKEN_SCRIPT,
+                List.of(entryCounterKey(gameId, currentEpochMinute()), activeTokenKey(gameId), tokenKey),
                 String.valueOf(nowMillis),
                 String.valueOf(effectiveEnterPerMinute),
                 tokenId,
                 String.valueOf(expiresAtMillis),
                 userId.toString(),
-                String.valueOf(tokenTtlSeconds));
+                String.valueOf(tokenTtlSeconds),
+                String.valueOf(ENTRY_COUNTER_TTL_SECONDS));
         if (acquired == null || acquired != 1L) {
             return null;
         }
@@ -391,6 +403,10 @@ public class WaitingRoomService {
         return ACTIVE_TOKEN_KEY_PREFIX + gameId + ":tokens";
     }
 
+    private String entryCounterKey(Long gameId, long epochMinute) {
+        return ENTRY_COUNTER_KEY_PREFIX + gameId + ":" + epochMinute;
+    }
+
     private void pruneStaleQueueMembers(String queueKey, String heartbeatKey, long nowMillis) {
         if (staleQueueEntryTtlMs <= 0) {
             return;
@@ -427,17 +443,9 @@ public class WaitingRoomService {
     }
 
     private long getCurrentMinuteRemainingSlots(Long gameId, int currentCapacityPerMinute) {
-        return getActiveSessionRemainingSlots(gameId, currentCapacityPerMinute);
-    }
-
-    private long getActiveSessionRemainingSlots(Long gameId, int capacity) {
-        pruneExpiredActiveSessions(gameId);
-        Long activeCount = redisTemplate.opsForZSet().zCard(activeTokenKey(gameId));
-        return Math.max(0L, capacity - (activeCount == null ? 0L : activeCount));
-    }
-
-    private void pruneExpiredActiveSessions(Long gameId) {
-        redisTemplate.opsForZSet().removeRangeByScore(activeTokenKey(gameId), 0, Instant.now().toEpochMilli());
+        String counterValue = redisTemplate.opsForValue().get(entryCounterKey(gameId, currentEpochMinute()));
+        long usedThisMinute = parseLongOrDefault(counterValue, 0L);
+        return Math.max(0L, currentCapacityPerMinute - usedThisMinute);
     }
 
     private int calculateEnterPerMinute(int policyLimit, int podCount) {
@@ -462,6 +470,10 @@ public class WaitingRoomService {
     private long secondsUntilNextAdmissionWindow() {
         long secondOfMinute = Instant.now().getEpochSecond() % 60;
         return secondOfMinute == 0 ? 60L : 60L - secondOfMinute;
+    }
+
+    private long currentEpochMinute() {
+        return Instant.now().getEpochSecond() / 60;
     }
 
     private long minutesToDrain(long waitingUsers, int capacityPerMinute) {
