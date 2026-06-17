@@ -4,10 +4,23 @@ server:
 spring:
   application:
     name: waiting-room-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/baseball_platform}
+    username: ${SPRING_DATASOURCE_USERNAME:baseball}
+    password: ${SPRING_DATASOURCE_PASSWORD:baseball}
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+app:
+  waiting-room:
+    admission:
+      ticket-service-name: ${WAITING_ROOM_TICKET_SERVICE_NAME:ticket-service}
+      capacity-per-pod-per-minute: ${WAITING_ROOM_TICKET_SERVICE_CAPACITY_PER_POD_PER_MINUTE:20}
+      fallback-ready-pods: ${WAITING_ROOM_TICKET_SERVICE_FALLBACK_READY_PODS:1}
+      kubernetes-enabled: ${WAITING_ROOM_KUBERNETES_CAPACITY_ENABLED:true}
+      cache-ttl-ms: ${WAITING_ROOM_CAPACITY_CACHE_TTL_MS:5000}
 
 management:
   endpoints:
