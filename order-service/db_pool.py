@@ -1,14 +1,48 @@
 import os
 import threading
+import time
 from contextlib import contextmanager
 
-import psycopg2
+from prometheus_client import Counter, Gauge, Histogram
 from psycopg2.pool import ThreadedConnectionPool
 
 
 _pool = None
 _pool_lock = threading.Lock()
 _pool_slots = None
+_service_name = os.getenv("PYTHON_DB_APPLICATION_NAME", "order-service")
+_configured_max_connections = max(1, int(os.getenv("PYTHON_DB_POOL_MAX_SIZE", "1")))
+
+POOL_IN_USE = Gauge(
+    "python_db_pool_in_use",
+    "Number of database connections currently checked out from the Python pool.",
+    ["service"],
+)
+POOL_AVAILABLE = Gauge(
+    "python_db_pool_available",
+    "Number of database connection slots currently available in the Python pool.",
+    ["service"],
+)
+POOL_MAX = Gauge(
+    "python_db_pool_max",
+    "Configured maximum number of database connections in the Python pool.",
+    ["service"],
+)
+POOL_ACQUIRE_TIMEOUTS = Counter(
+    "python_db_pool_acquire_timeout_total",
+    "Total number of Python DB pool acquisition timeouts.",
+    ["service"],
+)
+POOL_ACQUIRE_WAIT = Histogram(
+    "python_db_pool_acquire_wait_seconds",
+    "Time spent waiting to acquire a Python DB pool slot.",
+    ["service"],
+    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0),
+)
+
+POOL_IN_USE.labels(service=_service_name).set(0)
+POOL_AVAILABLE.labels(service=_service_name).set(_configured_max_connections)
+POOL_MAX.labels(service=_service_name).set(_configured_max_connections)
 
 
 class DbPoolExhaustedError(RuntimeError):
@@ -51,9 +85,15 @@ def _get_pool():
 def db_connection():
     pool = _get_pool()
     timeout = max(0.1, float(os.getenv("PYTHON_DB_POOL_TIMEOUT_SECONDS", "2")))
+    wait_started = time.monotonic()
     if not _pool_slots.acquire(timeout=timeout):
+        POOL_ACQUIRE_WAIT.labels(service=_service_name).observe(time.monotonic() - wait_started)
+        POOL_ACQUIRE_TIMEOUTS.labels(service=_service_name).inc()
         raise DbPoolExhaustedError("DB connection pool is exhausted")
 
+    POOL_ACQUIRE_WAIT.labels(service=_service_name).observe(time.monotonic() - wait_started)
+    POOL_IN_USE.labels(service=_service_name).inc()
+    POOL_AVAILABLE.labels(service=_service_name).dec()
     connection = None
     try:
         connection = pool.getconn()
@@ -67,6 +107,8 @@ def db_connection():
             if not connection.closed:
                 connection.rollback()
             pool.putconn(connection, close=bool(connection.closed))
+        POOL_IN_USE.labels(service=_service_name).dec()
+        POOL_AVAILABLE.labels(service=_service_name).inc()
         _pool_slots.release()
 
 
@@ -77,3 +119,5 @@ def close_db_pool():
             _pool.closeall()
             _pool = None
             _pool_slots = None
+            POOL_IN_USE.labels(service=_service_name).set(0)
+            POOL_AVAILABLE.labels(service=_service_name).set(_configured_max_connections)
