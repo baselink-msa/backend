@@ -44,6 +44,8 @@ public class WaitingRoomService {
 
     // Micrometer 메트릭
     private final AtomicLong activeUsersGauge;
+    private final AtomicLong dbConnectionsGauge;
+    private final AtomicLong dbThrottlePercentGauge;
     private final Counter passedCounter;
 
     private static final String QUEUE_KEY_PREFIX = "waiting:";
@@ -73,6 +75,16 @@ public class WaitingRoomService {
         this.activeUsersGauge = new AtomicLong(0);
         Gauge.builder("waiting_queue_active_users", activeUsersGauge, AtomicLong::doubleValue)
                 .description("현재 대기열에서 대기 중인 유저 수")
+                .register(meterRegistry);
+
+        this.dbConnectionsGauge = new AtomicLong(-1);
+        Gauge.builder("waiting_room_db_connections", dbConnectionsGauge, AtomicLong::doubleValue)
+                .description("대기열 입장량 계산에 사용한 RDS connection 수")
+                .register(meterRegistry);
+
+        this.dbThrottlePercentGauge = new AtomicLong(100);
+        Gauge.builder("waiting_room_db_throttle_percent", dbThrottlePercentGauge, AtomicLong::doubleValue)
+                .description("RDS connection 압력에 따른 대기열 입장 허용 비율")
                 .register(meterRegistry);
 
         // Counter: 대기열 통과 수
@@ -105,11 +117,31 @@ public class WaitingRoomService {
     @Value("${app.waiting-room.admission.scale-warmup-seconds:60}")
     private int scaleWarmupSeconds;
 
+    @Value("${app.waiting-room.admission.db-pressure.enabled:true}")
+    private boolean dbPressureEnabled;
+
+    @Value("${app.waiting-room.admission.db-pressure.connection-budget:60}")
+    private int dbConnectionBudget;
+
+    @Value("${app.waiting-room.admission.db-pressure.caution-threshold:40}")
+    private int dbCautionThreshold;
+
+    @Value("${app.waiting-room.admission.db-pressure.warning-threshold:50}")
+    private int dbWarningThreshold;
+
+    @Value("${app.waiting-room.admission.db-pressure.critical-threshold:55}")
+    private int dbCriticalThreshold;
+
+    @Value("${app.waiting-room.admission.db-pressure.cache-ttl-ms:5000}")
+    private long dbPressureCacheTtlMs;
+
     @Value("${app.waiting-room.queue.stale-entry-ttl-ms:600000}")
     private long staleQueueEntryTtlMs;
 
     private volatile long readyPodCountCacheExpiresAt = 0L;
     private volatile int cachedReadyPodCount = 1;
+    private volatile long dbPressureCacheExpiresAt = 0L;
+    private volatile DbPressure cachedDbPressure = DbPressure.normal(0, 60);
 
     private static final DefaultRedisScript<Long> ISSUE_TOKEN_SCRIPT = new DefaultRedisScript<>("""
             local used = tonumber(redis.call('GET', KEYS[1]) or '0')
@@ -224,7 +256,8 @@ public class WaitingRoomService {
 
         int policyLimit = Math.max(1, policy.maxEnterPerMinute());
         int readyPodCount = getTicketServiceReadyPodCount();
-        return calculateEnterPerMinute(policyLimit, readyPodCount);
+        int baseCapacity = calculateEnterPerMinute(policyLimit, readyPodCount);
+        return applyDbThrottle(baseCapacity, getDbPressure());
     }
 
     public AdmissionDecision evaluateAdmission(Long gameId, Long rank, WaitingRoomPolicy policy) {
@@ -242,14 +275,22 @@ public class WaitingRoomService {
                     getTicketServiceReadyPodCount(),
                     Integer.MAX_VALUE,
                     Integer.MAX_VALUE,
-                    Long.MAX_VALUE);
+                    Integer.MAX_VALUE,
+                    Long.MAX_VALUE,
+                    0,
+                    dbConnectionBudget,
+                    100,
+                    "DISABLED");
         }
 
         int policyLimit = Math.max(1, policy.maxEnterPerMinute());
         int readyPodCount = getTicketServiceReadyPodCount();
         int projectedPodCount = getProjectedTicketServicePodCount(gameId, readyPodCount);
-        int currentCapacityPerMinute = calculateEnterPerMinute(policyLimit, readyPodCount);
-        int projectedCapacityPerMinute = calculateEnterPerMinute(policyLimit, projectedPodCount);
+        int baseCurrentCapacityPerMinute = calculateEnterPerMinute(policyLimit, readyPodCount);
+        int baseProjectedCapacityPerMinute = calculateEnterPerMinute(policyLimit, projectedPodCount);
+        DbPressure dbPressure = getDbPressure();
+        int currentCapacityPerMinute = applyDbThrottle(baseCurrentCapacityPerMinute, dbPressure);
+        int projectedCapacityPerMinute = applyDbThrottle(baseProjectedCapacityPerMinute, dbPressure);
         long currentMinuteRemainingSlots = getCurrentMinuteRemainingSlots(gameId, currentCapacityPerMinute);
         boolean rankAllowed = rank != null && rank > 0 && rank <= currentCapacityPerMinute;
         boolean capacityAvailable = currentMinuteRemainingSlots > 0;
@@ -272,9 +313,14 @@ public class WaitingRoomService {
                 policyLimit,
                 readyPodCount,
                 projectedPodCount,
+                baseCurrentCapacityPerMinute,
                 currentCapacityPerMinute,
                 projectedCapacityPerMinute,
-                currentMinuteRemainingSlots);
+                currentMinuteRemainingSlots,
+                dbPressure.connectionCount(),
+                dbPressure.budget(),
+                dbPressure.throttlePercent(),
+                dbPressure.level());
     }
 
     private long estimateWaitSeconds(Long rank, boolean canEnter, int currentCapacityPerMinute,
@@ -327,9 +373,14 @@ public class WaitingRoomService {
             int policyMaxEnterPerMinute,
             int currentReadyPodCount,
             int projectedReadyPodCount,
+            int baseEnterPerMinute,
             int effectiveEnterPerMinute,
             int projectedEnterPerMinute,
-            long currentMinuteRemainingSlots) {
+            long currentMinuteRemainingSlots,
+            int currentDbConnections,
+            int dbConnectionBudget,
+            int dbThrottlePercent,
+            String dbPressureLevel) {
     }
 
     /**
@@ -451,6 +502,80 @@ public class WaitingRoomService {
     private int calculateEnterPerMinute(int policyLimit, int podCount) {
         int serviceCapacity = podCount <= 0 ? 0 : podCount * Math.max(1, capacityPerPodPerMinute);
         return Math.min(Math.max(1, policyLimit), serviceCapacity);
+    }
+
+    private int applyDbThrottle(int baseCapacity, DbPressure pressure) {
+        if (baseCapacity <= 0 || pressure.throttlePercent() <= 0) {
+            return 0;
+        }
+
+        int throttled = (int) Math.floor(baseCapacity * pressure.throttlePercent() / 100.0);
+        return Math.max(1, throttled);
+    }
+
+    private DbPressure getDbPressure() {
+        int budget = Math.max(1, dbConnectionBudget);
+        if (!dbPressureEnabled) {
+            return DbPressure.normal(0, budget);
+        }
+
+        long now = System.currentTimeMillis();
+        if (now < dbPressureCacheExpiresAt) {
+            return cachedDbPressure;
+        }
+
+        synchronized (this) {
+            now = System.currentTimeMillis();
+            if (now < dbPressureCacheExpiresAt) {
+                return cachedDbPressure;
+            }
+
+            cachedDbPressure = resolveDbPressure(budget);
+            dbPressureCacheExpiresAt = now + Math.max(1000L, dbPressureCacheTtlMs);
+            dbConnectionsGauge.set(cachedDbPressure.connectionCount());
+            dbThrottlePercentGauge.set(cachedDbPressure.throttlePercent());
+            return cachedDbPressure;
+        }
+    }
+
+    private DbPressure resolveDbPressure(int budget) {
+        try {
+            Integer connections = jdbcTemplate.queryForObject("""
+                    SELECT numbackends
+                    FROM pg_stat_database
+                    WHERE datname = current_database()
+                    """, Integer.class);
+            int connectionCount = connections == null ? 0 : Math.max(0, connections);
+            return calculateDbPressure(connectionCount, budget);
+        } catch (Exception e) {
+            log.warn("RDS connection 수 조회 실패. 신규 대기열 입장을 일시 중지합니다.", e);
+            return new DbPressure(-1, budget, 0, "UNKNOWN");
+        }
+    }
+
+    private DbPressure calculateDbPressure(int connectionCount, int budget) {
+        DbPressurePolicy.Result result = DbPressurePolicy.evaluate(
+                connectionCount,
+                budget,
+                dbCautionThreshold,
+                dbWarningThreshold,
+                dbCriticalThreshold);
+        return new DbPressure(
+                result.connectionCount(),
+                result.budget(),
+                result.throttlePercent(),
+                result.level());
+    }
+
+    private record DbPressure(
+            int connectionCount,
+            int budget,
+            int throttlePercent,
+            String level) {
+
+        private static DbPressure normal(int connectionCount, int budget) {
+            return new DbPressure(connectionCount, budget, 100, "NORMAL");
+        }
     }
 
     private int getProjectedTicketServicePodCount(Long gameId, int currentReadyPodCount) {

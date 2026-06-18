@@ -131,9 +131,14 @@ public class WaitingRoomController {
                 .policyMaxEnterPerMinute(admission.policyMaxEnterPerMinute())
                 .currentReadyPodCount(admission.currentReadyPodCount())
                 .projectedReadyPodCount(admission.projectedReadyPodCount())
+                .baseEnterPerMinute(admission.baseEnterPerMinute())
                 .effectiveEnterPerMinute(admission.effectiveEnterPerMinute())
                 .projectedEnterPerMinute(admission.projectedEnterPerMinute())
                 .currentMinuteRemainingSlots(admission.currentMinuteRemainingSlots())
+                .currentDbConnections(admission.currentDbConnections())
+                .dbConnectionBudget(admission.dbConnectionBudget())
+                .dbThrottlePercent(admission.dbThrottlePercent())
+                .dbPressureLevel(admission.dbPressureLevel())
                 .canEnter(admission.canEnter())
                 .build();
     }
