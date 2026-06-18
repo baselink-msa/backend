@@ -26,6 +26,13 @@ app:
       max-ticket-service-pods: ${WAITING_ROOM_TICKET_SERVICE_MAX_PODS:10}
       scale-target-waiting-users-per-pod: ${WAITING_ROOM_SCALE_TARGET_WAITING_USERS_PER_POD:20}
       scale-warmup-seconds: ${WAITING_ROOM_SCALE_WARMUP_SECONDS:60}
+      db-pressure:
+        enabled: ${WAITING_ROOM_DB_PRESSURE_ENABLED:true}
+        connection-budget: ${WAITING_ROOM_DB_CONNECTION_BUDGET:60}
+        caution-threshold: ${WAITING_ROOM_DB_CAUTION_THRESHOLD:40}
+        warning-threshold: ${WAITING_ROOM_DB_WARNING_THRESHOLD:50}
+        critical-threshold: ${WAITING_ROOM_DB_CRITICAL_THRESHOLD:55}
+        cache-ttl-ms: ${WAITING_ROOM_DB_PRESSURE_CACHE_TTL_MS:5000}
 
 management:
   endpoints:

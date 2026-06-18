@@ -17,8 +17,13 @@ public class WaitingResponse {
     private Integer policyMaxEnterPerMinute;
     private Integer currentReadyPodCount;
     private Integer projectedReadyPodCount;
+    private Integer baseEnterPerMinute;
     private Integer effectiveEnterPerMinute;
     private Integer projectedEnterPerMinute;
     private Long currentMinuteRemainingSlots;
+    private Integer currentDbConnections;
+    private Integer dbConnectionBudget;
+    private Integer dbThrottlePercent;
+    private String dbPressureLevel;
     private boolean canEnter;
 }
