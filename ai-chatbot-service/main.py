@@ -1,18 +1,48 @@
 import os
 import time
+from contextlib import asynccontextmanager
 
 import psycopg2
 import psycopg2.extras
 import boto3
 from botocore.exceptions import NoCredentialsError
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram
 from pydantic import BaseModel
 from typing import Optional
 
+from db_pool import DbPoolExhaustedError, close_db_pool, db_connection
 
-app = FastAPI(title="AI Chatbot Service", description="야구 규칙 및 구장 안내 FAQ + AI 챗봇 API")
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    try:
+        yield
+    finally:
+        close_db_pool()
+
+
+app = FastAPI(
+    title="AI Chatbot Service",
+    description="야구 규칙 및 구장 안내 FAQ + AI 챗봇 API",
+    lifespan=lifespan,
+)
+
+
+@app.exception_handler(DbPoolExhaustedError)
+async def db_pool_exhausted_handler(request: Request, exc: DbPoolExhaustedError):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "error": {
+                "code": "DB_CONNECTION_POOL_EXHAUSTED",
+                "message": "DB 연결이 사용 중입니다. 잠시 후 다시 시도해 주세요.",
+            },
+        },
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,22 +92,6 @@ except Exception:
     pass
 
 
-def get_db():
-    """RDS 연결"""
-    dsn_url = os.getenv("SPRING_DATASOURCE_URL", "")
-    host_part = dsn_url.replace("jdbc:postgresql://", "")
-    host_port, db_name = host_part.rsplit("/", 1) if "/" in host_part else (host_part, "baseball_platform")
-    host, port = host_port.split(":") if ":" in host_port else (host_port, "5432")
-
-    return psycopg2.connect(
-        host=host,
-        port=port,
-        dbname=db_name,
-        user=os.getenv("SPRING_DATASOURCE_USERNAME", "baseball"),
-        password=os.getenv("SPRING_DATASOURCE_PASSWORD", "baseball"),
-    )
-
-
 class ChatRequest(BaseModel):
     message: str
 
@@ -90,8 +104,7 @@ def root():
 @app.get("/api/chatbot/faqs")
 def get_faqs(category: Optional[str] = None):
     """실제 DB에서 FAQ 조회"""
-    conn = get_db()
-    try:
+    with db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             if category:
                 cur.execute("""
@@ -109,15 +122,12 @@ def get_faqs(category: Optional[str] = None):
                 """)
             faqs = cur.fetchall()
         return {"success": True, "data": faqs}
-    finally:
-        conn.close()
 
 
 @app.post("/api/chatbot/messages")
 def ask_chatbot(request: ChatRequest):
     """FAQ DB 매칭 → 없으면 Bedrock Agent로 답변"""
-    conn = get_db()
-    try:
+    with db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT answer FROM chatbot_schema.faq
@@ -125,8 +135,6 @@ def ask_chatbot(request: ChatRequest):
                 LIMIT 1
             """, (request.message,))
             row = cur.fetchone()
-    finally:
-        conn.close()
 
     if row:
         return {

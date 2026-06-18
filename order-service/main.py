@@ -1,35 +1,20 @@
-import os
 import time
 from contextlib import asynccontextmanager
 
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI, HTTPException, Header, Response
+from fastapi import FastAPI, HTTPException, Header, Request, Response
+from fastapi.responses import JSONResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram
 from pydantic import BaseModel
 from typing import List, Optional
 
-
-def get_db():
-    """RDS 연결. 환경변수에서 접속 정보를 가져온다."""
-    dsn_url = os.getenv("SPRING_DATASOURCE_URL", "")
-    host_part = dsn_url.replace("jdbc:postgresql://", "")
-    host_port, db_name = host_part.rsplit("/", 1) if "/" in host_part else (host_part, "baseball_platform")
-    host, port = host_port.split(":") if ":" in host_port else (host_port, "5432")
-
-    return psycopg2.connect(
-        host=host,
-        port=port,
-        dbname=db_name,
-        user=os.getenv("SPRING_DATASOURCE_USERNAME", "baseball"),
-        password=os.getenv("SPRING_DATASOURCE_PASSWORD", "baseball"),
-    )
+from db_pool import DbPoolExhaustedError, close_db_pool, db_connection
 
 
 def ensure_orders_table():
     """orders 테이블이 없으면 생성한다."""
-    conn = get_db()
-    try:
+    with db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 CREATE SCHEMA IF NOT EXISTS order_schema;
@@ -52,17 +37,32 @@ def ensure_orders_table():
                 );
             """)
         conn.commit()
-    finally:
-        conn.close()
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     ensure_orders_table()
-    yield
+    try:
+        yield
+    finally:
+        close_db_pool()
 
 
 app = FastAPI(title="Order Service", description="주류 주문 및 상태 관리 API", lifespan=lifespan)
+
+
+@app.exception_handler(DbPoolExhaustedError)
+async def db_pool_exhausted_handler(request: Request, exc: DbPoolExhaustedError):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "error": {
+                "code": "DB_CONNECTION_POOL_EXHAUSTED",
+                "message": "DB 연결이 사용 중입니다. 잠시 후 다시 시도해 주세요.",
+            },
+        },
+    )
 
 # Prometheus 메트릭 정의
 REQUEST_COUNT = Counter(
@@ -116,8 +116,7 @@ def root():
 @app.get("/api/orders/menus")
 def get_menus():
     """실제 DB에서 메뉴 조회"""
-    conn = get_db()
-    try:
+    with db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT menu_id AS "menuId", name, price, available
@@ -126,16 +125,13 @@ def get_menus():
             """)
             menus = cur.fetchall()
         return {"success": True, "data": menus}
-    finally:
-        conn.close()
 
 
 @app.post("/api/orders")
 def create_order(request: OrderRequest, x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """실제 DB에서 메뉴 가격을 조회하고 주문을 생성"""
     user_id = int(x_user_id) if x_user_id else None
-    conn = get_db()
-    try:
+    with db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             menu_ids = [item.menuId for item in request.items]
             cur.execute(
@@ -181,16 +177,13 @@ def create_order(request: OrderRequest, x_user_id: Optional[str] = Header(None, 
             },
             "message": "주문이 생성되었습니다.",
         }
-    finally:
-        conn.close()
 
 
 @app.get("/api/orders/my")
 def get_my_orders(x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """내 주문 목록 조회"""
     user_id = int(x_user_id) if x_user_id else None
-    conn = get_db()
-    try:
+    with db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             if user_id:
                 cur.execute("""
@@ -209,15 +202,12 @@ def get_my_orders(x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
             if o.get("createdAt"):
                 o["createdAt"] = o["createdAt"].isoformat()
         return {"success": True, "data": orders}
-    finally:
-        conn.close()
 
 
 @app.get("/api/orders/{order_id}")
 def get_order_detail(order_id: int):
     """주문 상세 조회"""
-    conn = get_db()
-    try:
+    with db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT order_id AS "orderId", user_id AS "userId", game_id AS "gameId",
@@ -239,15 +229,12 @@ def get_order_detail(order_id: int):
         if order.get("createdAt"):
             order["createdAt"] = order["createdAt"].isoformat()
         return {"success": True, "data": order}
-    finally:
-        conn.close()
 
 
 @app.patch("/api/orders/{order_id}/status")
 def update_order_status(order_id: int, request: OrderStatusUpdate):
     """주문 상태 변경"""
-    conn = get_db()
-    try:
+    with db_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 UPDATE order_schema.orders SET status = %s WHERE order_id = %s
@@ -258,5 +245,3 @@ def update_order_status(order_id: int, request: OrderStatusUpdate):
                 raise HTTPException(status_code=404, detail="주문을 찾을 수 없습니다.")
         conn.commit()
         return {"success": True, "data": row, "message": "주문 상태가 변경되었습니다."}
-    finally:
-        conn.close()
