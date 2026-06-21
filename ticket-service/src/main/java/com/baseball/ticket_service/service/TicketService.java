@@ -2,31 +2,27 @@ package com.baseball.ticket_service.service;
 
 import com.baseball.ticket_service.entity.GameSeat;
 import com.baseball.ticket_service.entity.Reservation;
+import com.baseball.ticket_service.event.TicketEventEnvelope;
+import com.baseball.ticket_service.event.TicketEventType;
 import com.baseball.ticket_service.repository.GameSeatRepository;
 import com.baseball.ticket_service.repository.ReservationRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.awspring.cloud.sqs.operations.SqsTemplate;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@Slf4j
 @Service
 public class TicketService {
 
     private final ReservationRepository reservationRepository;
     private final GameSeatRepository gameSeatRepository;
-    private final SqsTemplate sqsTemplate;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final TicketEventOutboxService ticketEventOutboxService;
 
     // Micrometer 메트릭
     private final Counter bookingRequestedCounter;
@@ -34,15 +30,13 @@ public class TicketService {
     private final Counter bookingCanceledCounter;
     private final Timer bookingDurationTimer;
 
-    private static final String CONFIRM_QUEUE_NAME = "ticket-confirm-queue";
-
     public TicketService(ReservationRepository reservationRepository,
                          GameSeatRepository gameSeatRepository,
-                         SqsTemplate sqsTemplate,
+                         TicketEventOutboxService ticketEventOutboxService,
                          MeterRegistry meterRegistry) {
         this.reservationRepository = reservationRepository;
         this.gameSeatRepository = gameSeatRepository;
-        this.sqsTemplate = sqsTemplate;
+        this.ticketEventOutboxService = ticketEventOutboxService;
 
         // 메트릭 정의
         this.bookingRequestedCounter = Counter.builder("ticket_booking_total")
@@ -65,30 +59,16 @@ public class TicketService {
                 .register(meterRegistry);
     }
 
-    /**
-     * 외부에서 호출하는 엔트리 포인트 (트랜잭션을 걸지 않음)
-     */
-    public Reservation requestReservation(Long userId, Long gameId, Long seatId, String lockId) {
-        // 1. DB 저장을 먼저 완벽히 끝내고 커밋까지 완료시킨다.
-        Reservation savedReservation = saveReservationInTransaction(userId, gameId, seatId, lockId);
-
-        // 2. 커밋이 확실히 끝난 후 SQS 메시지를 발송한다! (레이스 컨디션 완벽 방어)
-        sendSqsMessage(savedReservation, userId, gameId, seatId, lockId);
-
-        // 메트릭: 예매 요청 카운트
-        bookingRequestedCounter.increment();
-
-        return savedReservation;
-    }
-
-    /**
-     * DB 저장 및 커밋만 담당하는 독립된 트랜잭션 메서드
-     */
     @Transactional
-    public Reservation saveReservationInTransaction(Long userId, Long gameId, Long seatId, String lockId) {
+    public Reservation requestReservation(Long userId, Long gameId, Long seatId, String lockId) {
         String idempotencyKey = String.format("ticket:%d:%d:%d", userId, gameId, seatId);
+        Reservation existingReservation = reservationRepository.findByIdempotencyKey(idempotencyKey)
+                .orElse(null);
+        if (existingReservation != null) {
+            return existingReservation;
+        }
 
-        Reservation reservation = Reservation.builder()
+        Reservation savedReservation = reservationRepository.save(Reservation.builder()
                 .userId(userId)
                 .gameId(gameId)
                 .seatId(seatId)
@@ -97,9 +77,26 @@ public class TicketService {
                 .idempotencyKey(idempotencyKey)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
-                .build();
+                .build());
 
-        return reservationRepository.save(reservation);
+        ticketEventOutboxService.appendDomainEvent(TicketEventEnvelope.reservation(
+                TicketEventType.RESERVATION_REQUESTED,
+                savedReservation.getReservationId(),
+                gameId,
+                null,
+                Map.of(
+                        "reservationId", savedReservation.getReservationId(),
+                        "seatId", seatId,
+                        "status", savedReservation.getStatus().name())));
+
+        ticketEventOutboxService.appendTicketConfirmationCommand(
+                savedReservation.getReservationId(),
+                userId,
+                gameId,
+                seatId,
+                lockId);
+        bookingRequestedCounter.increment();
+        return savedReservation;
     }
 
     /**
@@ -139,6 +136,20 @@ public class TicketService {
         gameSeatRepository.findByGameIdAndSeatId(reservation.getGameId(), reservation.getSeatId())
                 .ifPresent(GameSeat::markSold);
 
+        long pendingDurationSeconds = reservation.getCreatedAt() == null
+                ? 0
+                : Math.max(0, Duration.between(reservation.getCreatedAt(), LocalDateTime.now()).toSeconds());
+        ticketEventOutboxService.appendDomainEvent(TicketEventEnvelope.reservation(
+                TicketEventType.RESERVATION_CONFIRMED,
+                reservation.getReservationId(),
+                reservation.getGameId(),
+                null,
+                Map.of(
+                        "reservationId", reservation.getReservationId(),
+                        "seatId", reservation.getSeatId(),
+                        "status", reservation.getStatus().name(),
+                        "pendingDurationSeconds", pendingDurationSeconds)));
+
         // 메트릭: 예매 확정 카운트
         bookingConfirmedCounter.increment();
 
@@ -177,24 +188,4 @@ public class TicketService {
         return reservation;
     }
 
-    /**
-     * SQS 메시지 발송 메서드
-     */
-    private void sendSqsMessage(Reservation savedReservation, Long userId, Long gameId, Long seatId, String lockId) {
-        try {
-            Map<String, Object> messagePayload = new HashMap<>();
-            messagePayload.put("reservationId", savedReservation.getReservationId());
-            messagePayload.put("userId", userId);
-            messagePayload.put("gameId", gameId);
-            messagePayload.put("seatId", seatId);
-            messagePayload.put("lockId", lockId);
-
-            String jsonMessage = objectMapper.writeValueAsString(messagePayload);
-
-            sqsTemplate.send(to -> to.queue(CONFIRM_QUEUE_NAME).payload(jsonMessage));
-            log.info("예매 확정 요청 메시지 발송 완료: reservationId={}", savedReservation.getReservationId());
-        } catch (Exception e) {
-            log.error("SQS 메시지 발송 실패. reservationId={}. 사유: {}", savedReservation.getReservationId(), e.getMessage());
-        }
-    }
 }

@@ -37,3 +37,15 @@ management:
   metrics:
     tags:
       application: ${spring.application.name} # 나중에 그라파나에서 서비스별로 필터링하기 위한 태그
+
+app:
+  ticket-events:
+    queue-name: ${TICKET_EVENT_QUEUE_NAME:ticket-domain-events}
+    ticket-confirm-queue-name: ${SQS_TICKET_CONFIRM_QUEUE_NAME:ticket-confirm-queue}
+    publisher:
+      fixed-delay-ms: ${TICKET_EVENT_PUBLISHER_FIXED_DELAY_MS:2000}
+      initial-delay-ms: ${TICKET_EVENT_PUBLISHER_INITIAL_DELAY_MS:10000}
+      batch-size: ${TICKET_EVENT_PUBLISHER_BATCH_SIZE:20}
+      max-attempts: ${TICKET_EVENT_PUBLISHER_MAX_ATTEMPTS:10}
+      lease-seconds: ${TICKET_EVENT_PUBLISHER_LEASE_SECONDS:600}
+      lease-recovery-delay-ms: ${TICKET_EVENT_LEASE_RECOVERY_DELAY_MS:60000}
