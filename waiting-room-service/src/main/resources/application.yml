@@ -4,6 +4,12 @@ server:
 spring:
   application:
     name: waiting-room-service
+  cloud:
+    aws:
+      region:
+        static: ${SPRING_CLOUD_AWS_REGION_STATIC:ap-northeast-2}
+      sqs:
+        endpoint: ${SPRING_CLOUD_AWS_SQS_ENDPOINT:https://sqs.ap-northeast-2.amazonaws.com}
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/baseball_platform}
     username: ${SPRING_DATASOURCE_USERNAME:baseball}
@@ -14,6 +20,8 @@ spring:
       port: ${SPRING_DATA_REDIS_PORT:6379}
 
 app:
+  ticket-events:
+    queue-name: ${TICKET_EVENT_QUEUE_NAME:ticket-domain-events}
   waiting-room:
     queue:
       stale-entry-ttl-ms: ${WAITING_ROOM_STALE_ENTRY_TTL_MS:600000}

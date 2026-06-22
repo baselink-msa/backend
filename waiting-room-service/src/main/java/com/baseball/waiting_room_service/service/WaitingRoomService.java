@@ -41,6 +41,7 @@ public class WaitingRoomService {
     private final StringRedisTemplate redisTemplate;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final WaitingEventPublisher waitingEventPublisher;
 
     // Micrometer 메트릭
     private final AtomicLong activeUsersGauge;
@@ -66,10 +67,12 @@ public class WaitingRoomService {
     public WaitingRoomService(StringRedisTemplate redisTemplate,
                               JdbcTemplate jdbcTemplate,
                               ObjectMapper objectMapper,
-                              MeterRegistry meterRegistry) {
+                              MeterRegistry meterRegistry,
+                              WaitingEventPublisher waitingEventPublisher) {
         this.redisTemplate = redisTemplate;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.waitingEventPublisher = waitingEventPublisher;
 
         // Gauge: 현재 대기 중인 유저 수
         this.activeUsersGauge = new AtomicLong(0);
@@ -176,7 +179,7 @@ public class WaitingRoomService {
         pruneStaleQueueMembers(queueKey, heartbeatKey, timestamp);
 
         // ZADD: 이미 대기열에 있다면 갱신하지 않음 (addIfAbsent)
-        redisTemplate.opsForZSet().addIfAbsent(queueKey, userId.toString(), timestamp);
+        Boolean newlyEntered = redisTemplate.opsForZSet().addIfAbsent(queueKey, userId.toString(), timestamp);
         redisTemplate.opsForZSet().add(heartbeatKey, userId.toString(), timestamp);
 
         // Gauge 업데이트: 해당 게임 대기열 사이즈 반영
@@ -187,7 +190,15 @@ public class WaitingRoomService {
 
         // ZRANK: 내 순번 조회 (0부터 시작하므로 +1)
         Long rank = redisTemplate.opsForZSet().rank(queueKey, userId.toString());
-        return (rank != null) ? rank + 1 : -1L;
+        long oneBasedRank = (rank != null) ? rank + 1 : -1L;
+        if (Boolean.TRUE.equals(newlyEntered) && oneBasedRank > 0) {
+            WaitingRoomPolicy policy = getWaitingRoomPolicy(gameId);
+            waitingEventPublisher.publishWaitingEntered(
+                    gameId,
+                    oneBasedRank,
+                    policy.maxEnterPerMinute());
+        }
+        return oneBasedRank;
     }
 
     /**
@@ -391,7 +402,9 @@ public class WaitingRoomService {
         String tokenKey = TOKEN_KEY_PREFIX + tokenId;
         WaitingRoomPolicy policy = getWaitingRoomPolicy(gameId);
         int effectiveEnterPerMinute = getEffectiveEnterPerMinute(policy);
+        DbPressure dbPressure = getDbPressure();
         long nowMillis = Instant.now().toEpochMilli();
+        Double enteredAtMillis = redisTemplate.opsForZSet().score(queueKey(gameId), userId.toString());
         long expiresAtMillis = nowMillis + tokenTtlSeconds * 1000L;
         Long acquired = redisTemplate.execute(
                 ISSUE_TOKEN_SCRIPT,
@@ -420,6 +433,16 @@ public class WaitingRoomService {
         if (size != null) {
             activeUsersGauge.set(size);
         }
+
+        long waitingSeconds = enteredAtMillis == null
+                ? 0L
+                : Math.max(0L, (nowMillis - enteredAtMillis.longValue()) / 1000L);
+        waitingEventPublisher.publishAccessTokenIssued(
+                gameId,
+                waitingSeconds,
+                effectiveEnterPerMinute,
+                dbPressure.level(),
+                dbPressure.throttlePercent());
 
         log.info("입장 토큰 발급 완료: gameId={}, userId={}, tokenId={}", gameId, userId, tokenId);
         return tokenId;
