@@ -9,7 +9,7 @@
 | auth-service | Spring Boot / Java 17 | 8081 | 회원가입, 로그인, JWT 발급 |
 | game-service | Spring Boot / Java 17 | 8082 | 경기, 구장, 좌석 조회 |
 | admin-service | Spring Boot / Java 17 | 8083 | 관리자 CRUD, 구장 기본 좌석 생성, 경기 좌석 연결 |
-| waiting-room-service | Spring Boot / Java 17 | 8084 | Redis 기반 예매 대기열 |
+| waiting-room-service | Spring Boot / Java 17 | 8084 | Redis 기반 예매 대기열, 입장 처리량 계산 |
 | ticket-worker-service | Spring Boot / Java 17 | 8085 | SQS 예매 메시지 검증 소비자 |
 | seat-lock-service | Spring Boot / Java 17 | 8086 | Redis 좌석 잠금, game_seats 상태 동기화 |
 | ticket-service | Spring Boot / Java 17 | 8087 | 예매 생성, 상세/목록 조회, 확정, 취소 |
@@ -18,11 +18,22 @@
 
 ## 주요 기능
 
+- 인증/계정
+  - 회원가입, 로그인, JWT 발급
+  - 회원탈퇴 시 예매 내역과 주문 내역 함께 삭제
 - 관리자 API
   - 구장, 경기, 좌석구역, 좌석, 메뉴, FAQ CRUD
   - 구장 등록 시 기본 5개 구역 x 200석 자동 생성
   - 경기 등록 시 해당 구장의 좌석을 `ticket_schema.game_seats`에 자동 연결
+  - 경기별 대기열 정책 조회/수정
   - dev 환경에서는 인증을 `permitAll`로 완화
+- 대기열
+  - Redis ZSET 기반 순번 관리
+  - ticket-service Ready Pod 수 기준 입장 처리량 계산
+  - 정책상 분당 최대 입장 수와 Pod 처리량 중 작은 값으로 effective capacity 산정
+  - 좌석 선택 입장 토큰 TTL 관리
+  - active token slot을 사용해 좌석 선택 중인 사용자 수 제한
+  - 좌석 선택 종료/이탈 시 `/release-token`으로 다음 대기자 입장 가능
 - 예매 API
   - 예매 요청, 예매 상세 조회, 내 예매 목록
   - 사용자 직접 확정/취소
@@ -30,6 +41,7 @@
 - 좌석 잠금
   - Redis 잠금 생성/해제
   - DB `game_seats.status`를 `LOCKED`/`AVAILABLE`로 업데이트
+  - Micrometer counter로 좌석 선점 성공/실패 지표 제공
 - 주문/챗봇
   - Mock 데이터 제거
   - PostgreSQL RDS 스키마 직접 조회
@@ -96,6 +108,17 @@ Kubernetes 배포에서는 `baselink-gitops/base/configmap.yaml`과 `backend-sec
 | `SQS_TICKET_CONFIRM_QUEUE_NAME` | 예매 검증 큐 이름 |
 | `KNOWLEDGE_BASE_ID` | Bedrock Knowledge Base ID |
 
+waiting-room-service는 아래 설정도 사용합니다.
+
+| 변수 | 설명 |
+| --- | --- |
+| `APP_WAITING_ROOM_ADMISSION_TICKET_SERVICE_NAME` | 처리량 계산 기준이 되는 ticket-service 이름 |
+| `APP_WAITING_ROOM_ADMISSION_CAPACITY_PER_POD_PER_MINUTE` | ticket-service Pod 1개당 분당 처리량 |
+| `APP_WAITING_ROOM_ADMISSION_FALLBACK_READY_PODS` | Kubernetes API 조회 실패 시 fallback Pod 수 |
+| `APP_WAITING_ROOM_ADMISSION_KUBERNETES_ENABLED` | Kubernetes EndpointSlice 조회 사용 여부 |
+| `APP_WAITING_ROOM_ADMISSION_CACHE_TTL_MS` | Ready Pod 수 캐시 TTL |
+| `APP_WAITING_ROOM_QUEUE_STALE_ENTRY_TTL_MS` | 오래된 대기열 entry 정리 TTL |
+
 ## CI/CD
 
 `.github/workflows`에 서비스별 워크플로우 9개가 있습니다.
@@ -136,5 +159,6 @@ aws eks update-kubeconfig --region ap-northeast-2 --name baselink-dev
 ## 알려진 이슈
 
 - Redis 좌석 잠금 TTL이 자연 만료될 때 DB `game_seats.status`가 `LOCKED`로 남을 수 있습니다. Redis keyspace notification 리스너 또는 주기적 정리 배치가 필요합니다.
+- 좌석 선택 입장 토큰 반납은 프론트의 페이지 이탈/예매 완료 흐름에 의존합니다. 브라우저 종료나 네트워크 중단 상황에서는 TTL 만료로 최종 정리됩니다.
 - 팀 등록/수정/삭제 API는 아직 별도 엔티티가 없어 미구현입니다.
 - 관리자 권한 부여/회수 API는 auth-service 영역 TODO입니다.
