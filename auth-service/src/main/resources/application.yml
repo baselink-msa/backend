@@ -18,6 +18,8 @@ spring:
         format_sql: true
   flyway:
     enabled: true
+    user: ${SPRING_FLYWAY_USER:${SPRING_DATASOURCE_USERNAME:baseball}}
+    password: ${SPRING_FLYWAY_PASSWORD:${SPRING_DATASOURCE_PASSWORD:baseball}}
     schemas: auth_schema,game_schema,ticket_schema,order_schema,chatbot_schema
     locations: classpath:db/migration
     baseline-on-migrate: true
