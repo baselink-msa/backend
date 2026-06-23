@@ -12,36 +12,8 @@ from typing import List, Optional
 from db_pool import DbPoolExhaustedError, close_db_pool, db_connection
 
 
-def ensure_orders_table():
-    """orders 테이블이 없으면 생성한다."""
-    with db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE SCHEMA IF NOT EXISTS order_schema;
-                CREATE TABLE IF NOT EXISTS order_schema.orders (
-                    order_id SERIAL PRIMARY KEY,
-                    user_id BIGINT,
-                    game_id BIGINT NOT NULL,
-                    seat_id BIGINT NOT NULL,
-                    status VARCHAR(30) NOT NULL DEFAULT 'ORDERED',
-                    total_price INTEGER NOT NULL DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT now()
-                );
-                CREATE TABLE IF NOT EXISTS order_schema.order_items (
-                    order_item_id SERIAL PRIMARY KEY,
-                    order_id INTEGER REFERENCES order_schema.orders(order_id) ON DELETE CASCADE,
-                    menu_id BIGINT NOT NULL,
-                    menu_name VARCHAR(100),
-                    quantity INTEGER NOT NULL,
-                    price INTEGER NOT NULL
-                );
-            """)
-        conn.commit()
-
-
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    ensure_orders_table()
     try:
         yield
     finally:
