@@ -18,13 +18,16 @@ import static org.mockito.Mockito.verify;
 class WaitingEventPublisherTest {
 
     private SqsTemplate sqsTemplate;
+    private WaitingOperationalKafkaPublisher kafkaPublisher;
     private WaitingEventPublisher publisher;
 
     @BeforeEach
     void setUp() {
         sqsTemplate = mock(SqsTemplate.class);
+        kafkaPublisher = mock(WaitingOperationalKafkaPublisher.class);
         publisher = new WaitingEventPublisher(
                 sqsTemplate,
+                kafkaPublisher,
                 new SimpleMeterRegistry(),
                 "ticket-domain-events");
     }
@@ -35,6 +38,7 @@ class WaitingEventPublisherTest {
         publisher.publishAccessTokenIssued(1L, 87L, 30, "CAUTION", 75);
 
         verify(sqsTemplate, times(2)).send(any(java.util.function.Consumer.class));
+        verify(kafkaPublisher, times(2)).publish(any(WaitingEventEnvelope.class));
     }
 
     @Test
@@ -45,6 +49,19 @@ class WaitingEventPublisherTest {
 
         assertDoesNotThrow(() ->
                 publisher.publishWaitingEntered(1L, 42L, 100));
+    }
+
+    @Test
+    void kafkaFailureDoesNotEscapeToAdmissionFlowWhenSqsSendSucceeds() {
+        doThrow(new IllegalStateException("Kafka unavailable"))
+                .when(kafkaPublisher)
+                .publish(any(WaitingEventEnvelope.class));
+
+        assertDoesNotThrow(() ->
+                publisher.publishWaitingEntered(1L, 42L, 100));
+
+        verify(sqsTemplate).send(any(java.util.function.Consumer.class));
+        verify(kafkaPublisher).publish(any(WaitingEventEnvelope.class));
     }
 
     @Test
