@@ -20,6 +20,13 @@ spring:
       port: ${SPRING_DATA_REDIS_PORT:6379}
 
 app:
+  kafka:
+    enabled: ${KAFKA_ENABLED:false}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    security-protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+    sasl-mechanism: ${KAFKA_SASL_MECHANISM:}
+    topics:
+      waiting-operational-events: ${KAFKA_TOPIC_WAITING_OPERATIONAL_EVENTS:waiting.operational.events}
   ticket-events:
     queue-name: ${TICKET_EVENT_QUEUE_NAME:ticket-domain-events}
   waiting-room:

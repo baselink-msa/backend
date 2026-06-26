@@ -16,15 +16,18 @@ import java.util.Map;
 public class WaitingEventPublisher {
 
     private final SqsTemplate sqsTemplate;
+    private final WaitingOperationalKafkaPublisher kafkaPublisher;
     private final String queueName;
     private final Counter publishedCounter;
     private final Counter failedCounter;
 
     public WaitingEventPublisher(
             SqsTemplate sqsTemplate,
+            WaitingOperationalKafkaPublisher kafkaPublisher,
             MeterRegistry meterRegistry,
             @Value("${app.ticket-events.queue-name:ticket-domain-events}") String queueName) {
         this.sqsTemplate = sqsTemplate;
+        this.kafkaPublisher = kafkaPublisher;
         this.queueName = queueName;
         this.publishedCounter = Counter.builder("waiting_event_publish_total")
                 .tag("result", "success")
@@ -67,6 +70,7 @@ public class WaitingEventPublisher {
     private void publish(WaitingEventEnvelope event) {
         try {
             sqsTemplate.send(to -> to.queue(queueName).payload(event));
+            publishToKafka(event);
             publishedCounter.increment();
             log.debug("대기열 이벤트 발행 완료: eventType={}, eventId={}",
                     event.eventType(), event.eventId());
@@ -74,6 +78,15 @@ public class WaitingEventPublisher {
             failedCounter.increment();
             log.warn("대기열 이벤트 발행 실패: eventType={}, eventId={}",
                     event.eventType(), event.eventId(), exception);
+        }
+    }
+
+    private void publishToKafka(WaitingEventEnvelope event) {
+        try {
+            kafkaPublisher.publish(event);
+        } catch (Exception e) {
+            log.warn("Kafka 보조 발행 실패를 대기열 이벤트 실패로 처리하지 않습니다: eventType={}, eventId={}",
+                    event.eventType(), event.eventId(), e);
         }
     }
 }
