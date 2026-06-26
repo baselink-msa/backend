@@ -22,6 +22,7 @@ public class TicketEventOutboxPublisher {
 
     private final TicketEventOutboxClaimService claimService;
     private final SqsTemplate sqsTemplate;
+    private final TicketDomainKafkaPublisher kafkaPublisher;
     private final String domainEventQueueName;
     private final String ticketConfirmQueueName;
     private final int batchSize;
@@ -35,6 +36,7 @@ public class TicketEventOutboxPublisher {
     public TicketEventOutboxPublisher(
             TicketEventOutboxClaimService claimService,
             SqsTemplate sqsTemplate,
+            TicketDomainKafkaPublisher kafkaPublisher,
             MeterRegistry meterRegistry,
             @Value("${app.ticket-events.queue-name:ticket-domain-events}") String domainEventQueueName,
             @Value("${app.ticket-events.ticket-confirm-queue-name:ticket-confirm-queue}") String ticketConfirmQueueName,
@@ -43,6 +45,7 @@ public class TicketEventOutboxPublisher {
             @Value("${app.ticket-events.publisher.lease-seconds:600}") long leaseSeconds) {
         this.claimService = claimService;
         this.sqsTemplate = sqsTemplate;
+        this.kafkaPublisher = kafkaPublisher;
         this.domainEventQueueName = domainEventQueueName;
         this.ticketConfirmQueueName = ticketConfirmQueueName;
         this.batchSize = Math.max(1, batchSize);
@@ -97,6 +100,7 @@ public class TicketEventOutboxPublisher {
     private void publish(ClaimedOutboxEvent event) {
         try {
             sqsTemplate.send(to -> to.queue(resolveQueueName(event.destination())).payload(event.payload()));
+            publishToKafkaIfDomainEvent(event);
             claimService.markPublished(event.outboxId());
             publishedCounter.increment();
             log.debug("Outbox event 발행 완료: outboxId={}, attempts={}", event.outboxId(), event.attempts());
@@ -113,6 +117,22 @@ public class TicketEventOutboxPublisher {
                     event.outboxId(),
                     event.attempts(),
                     backoff.toSeconds(),
+                    e);
+        }
+    }
+
+    private void publishToKafkaIfDomainEvent(ClaimedOutboxEvent event) {
+        if (event.destination() != OutboxDestination.DOMAIN_EVENTS) {
+            return;
+        }
+
+        try {
+            kafkaPublisher.publishDomainEvent(event);
+        } catch (Exception e) {
+            log.warn(
+                    "Kafka 보조 발행 실패를 Outbox 실패로 처리하지 않습니다: outboxId={}, destination={}",
+                    event.outboxId(),
+                    event.destination(),
                     e);
         }
     }

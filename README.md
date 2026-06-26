@@ -108,6 +108,16 @@ Kubernetes 배포에서는 `baselink-gitops/base/configmap.yaml`과 `backend-sec
 | `SQS_TICKET_CONFIRM_QUEUE_NAME` | 예매 검증 큐 이름 |
 | `KNOWLEDGE_BASE_ID` | Bedrock Knowledge Base ID |
 
+ticket-service Kafka dual publish는 아래 설정을 사용합니다.
+
+| 변수 | 설명 |
+| --- | --- |
+| `KAFKA_ENABLED` | Kafka 보조 발행 활성화 여부. 기본값은 `false` |
+| `KAFKA_BOOTSTRAP_SERVERS` | MSK Serverless IAM bootstrap broker |
+| `KAFKA_SECURITY_PROTOCOL` | dev MSK Serverless 기준 `SASL_SSL` |
+| `KAFKA_SASL_MECHANISM` | dev MSK Serverless 기준 `AWS_MSK_IAM` |
+| `KAFKA_TOPIC_TICKET_DOMAIN_EVENTS` | ticket-service Outbox domain event를 발행할 Kafka topic |
+
 waiting-room-service는 아래 설정도 사용합니다.
 
 | 변수 | 설명 |
