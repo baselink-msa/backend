@@ -39,6 +39,13 @@ management:
       application: ${spring.application.name} # 나중에 그라파나에서 서비스별로 필터링하기 위한 태그
 
 app:
+  kafka:
+    enabled: ${KAFKA_ENABLED:false}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    security-protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+    sasl-mechanism: ${KAFKA_SASL_MECHANISM:}
+    topics:
+      ticket-domain-events: ${KAFKA_TOPIC_TICKET_DOMAIN_EVENTS:ticket.domain.events}
   ticket-events:
     queue-name: ${TICKET_EVENT_QUEUE_NAME:ticket-domain-events}
     ticket-confirm-queue-name: ${SQS_TICKET_CONFIRM_QUEUE_NAME:ticket-confirm-queue}

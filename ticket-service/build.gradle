@@ -8,6 +8,10 @@ dependencies {
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs:3.1.1'
     implementation 'software.amazon.awssdk:sts:2.21.46'
 
+    // Kafka / Amazon MSK IAM
+    implementation 'org.springframework.kafka:spring-kafka'
+    implementation 'software.amazon.msk:aws-msk-iam-auth:2.2.0'
+
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'

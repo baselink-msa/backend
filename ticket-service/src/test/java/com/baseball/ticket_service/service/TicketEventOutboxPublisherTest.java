@@ -31,6 +31,9 @@ class TicketEventOutboxPublisherTest {
     @Mock
     private SqsTemplate sqsTemplate;
 
+    @Mock
+    private TicketDomainKafkaPublisher kafkaPublisher;
+
     private TicketEventOutboxPublisher publisher;
 
     @BeforeEach
@@ -38,6 +41,7 @@ class TicketEventOutboxPublisherTest {
         publisher = new TicketEventOutboxPublisher(
                 claimService,
                 sqsTemplate,
+                kafkaPublisher,
                 new SimpleMeterRegistry(),
                 "ticket-domain-events",
                 "ticket-confirm-queue",
@@ -58,8 +62,44 @@ class TicketEventOutboxPublisherTest {
 
         publisher.publishPendingEvents();
 
+        verify(kafkaPublisher).publishDomainEvent(event);
         verify(claimService).markPublished(11L);
         verify(claimService, never()).markFailed(eq(11L), any(Instant.class), any(String.class));
+    }
+
+    @Test
+    void doesNotPublishTicketConfirmCommandToKafka() {
+        ClaimedOutboxEvent event = new ClaimedOutboxEvent(
+                13L,
+                OutboxDestination.TICKET_CONFIRM,
+                "{\"reservationId\":381}",
+                1);
+        when(claimService.claim(any(String.class), eq(20), eq(10)))
+                .thenReturn(List.of(event));
+
+        publisher.publishPendingEvents();
+
+        verify(kafkaPublisher, never()).publishDomainEvent(any(ClaimedOutboxEvent.class));
+        verify(claimService).markPublished(13L);
+    }
+
+    @Test
+    void marksEventPublishedWhenKafkaBestEffortPublishFailsAfterSqsSend() {
+        ClaimedOutboxEvent event = new ClaimedOutboxEvent(
+                14L,
+                OutboxDestination.DOMAIN_EVENTS,
+                "{\"eventId\":\"event-3\"}",
+                1);
+        when(claimService.claim(any(String.class), eq(20), eq(10)))
+                .thenReturn(List.of(event));
+        doThrow(new IllegalStateException("Kafka unavailable"))
+                .when(kafkaPublisher)
+                .publishDomainEvent(event);
+
+        publisher.publishPendingEvents();
+
+        verify(claimService).markPublished(14L);
+        verify(claimService, never()).markFailed(eq(14L), any(Instant.class), any(String.class));
     }
 
     @Test
