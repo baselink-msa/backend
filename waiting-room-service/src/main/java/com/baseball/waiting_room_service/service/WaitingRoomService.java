@@ -42,6 +42,7 @@ public class WaitingRoomService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final WaitingEventPublisher waitingEventPublisher;
+    private final CapacitySignalKafkaPublisher capacitySignalKafkaPublisher;
 
     // Micrometer 메트릭
     private final AtomicLong activeUsersGauge;
@@ -68,11 +69,13 @@ public class WaitingRoomService {
                               JdbcTemplate jdbcTemplate,
                               ObjectMapper objectMapper,
                               MeterRegistry meterRegistry,
-                              WaitingEventPublisher waitingEventPublisher) {
+                              WaitingEventPublisher waitingEventPublisher,
+                              CapacitySignalKafkaPublisher capacitySignalKafkaPublisher) {
         this.redisTemplate = redisTemplate;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.waitingEventPublisher = waitingEventPublisher;
+        this.capacitySignalKafkaPublisher = capacitySignalKafkaPublisher;
 
         // Gauge: 현재 대기 중인 유저 수
         this.activeUsersGauge = new AtomicLong(0);
@@ -313,6 +316,21 @@ public class WaitingRoomService {
                 projectedCapacityPerMinute,
                 currentMinuteRemainingSlots);
         int nextCheckAfterSeconds = estimateNextCheckAfterSeconds(canEnter, estimatedWaitSeconds);
+
+        capacitySignalKafkaPublisher.recordAdmissionDecision(
+                gameId,
+                dbPressure.level(),
+                dbPressure.connectionCount(),
+                dbPressure.budget(),
+                dbPressure.throttlePercent(),
+                policyLimit,
+                readyPodCount,
+                projectedPodCount,
+                baseCurrentCapacityPerMinute,
+                currentCapacityPerMinute,
+                projectedCapacityPerMinute,
+                currentMinuteRemainingSlots,
+                canEnter);
 
         return new AdmissionDecision(
                 rankAllowed,
