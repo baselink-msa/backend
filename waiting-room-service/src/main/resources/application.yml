@@ -27,6 +27,7 @@ app:
     sasl-mechanism: ${KAFKA_SASL_MECHANISM:}
     topics:
       waiting-operational-events: ${KAFKA_TOPIC_WAITING_OPERATIONAL_EVENTS:waiting.operational.events}
+      capacity-signals: ${KAFKA_TOPIC_CAPACITY_SIGNALS:capacity.signals}
   ticket-events:
     queue-name: ${TICKET_EVENT_QUEUE_NAME:ticket-domain-events}
   waiting-room:
