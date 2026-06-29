@@ -28,3 +28,12 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+
+app:
+  kafka:
+    enabled: ${KAFKA_ENABLED:false}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    security-protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+    sasl-mechanism: ${KAFKA_SASL_MECHANISM:}
+    topics:
+      reservation-lifecycle-events: ${KAFKA_TOPIC_RESERVATION_LIFECYCLE_EVENTS:reservation.lifecycle.events}
