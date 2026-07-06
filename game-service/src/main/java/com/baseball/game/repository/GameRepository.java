@@ -12,10 +12,10 @@ public interface GameRepository extends JpaRepository<Game, Long> {
 
     // @EntityGraph: stadium을 함께 fetch → N+1 방지
     @EntityGraph(attributePaths = "stadium")
-    List<Game> findAllByOrderByGameStartTimeAsc();
+    List<Game> findAllByOrderByGameStartTimeDesc();
 
     @EntityGraph(attributePaths = "stadium")
-    List<Game> findByStatusOrderByGameStartTimeAsc(GameStatus status);
+    List<Game> findByStatusOrderByGameStartTimeDesc(GameStatus status);
 
     @EntityGraph(attributePaths = "stadium")
     Optional<Game> findByGameId(Long gameId);

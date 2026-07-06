@@ -30,9 +30,9 @@ public class GameService {
     public List<GameListItem> getGames(String status) {
         List<Game> games;
         if (status != null && !status.isBlank()) {
-            games = gameRepository.findByStatusOrderByGameStartTimeAsc(parseStatus(status));
+            games = gameRepository.findByStatusOrderByGameStartTimeDesc(parseStatus(status));
         } else {
-            games = gameRepository.findAllByOrderByGameStartTimeAsc();
+            games = gameRepository.findAllByOrderByGameStartTimeDesc();
         }
         return games.stream().map(GameListItem::from).toList();
     }
