@@ -8,4 +8,6 @@ import java.util.Optional;
 public interface WaitingRoomPolicyRepository extends JpaRepository<WaitingRoomPolicy, Long> {
 
     Optional<WaitingRoomPolicy> findByGameId(Long gameId);
+
+    void deleteByGameId(Long gameId);
 }

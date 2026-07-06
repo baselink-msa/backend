@@ -9,9 +9,14 @@ import com.baseball.ticket_service.repository.ReservationRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,6 +28,7 @@ public class TicketService {
     private final ReservationRepository reservationRepository;
     private final GameSeatRepository gameSeatRepository;
     private final TicketEventOutboxService ticketEventOutboxService;
+    private final JdbcTemplate jdbcTemplate;
 
     // Micrometer 메트릭
     private final Counter bookingRequestedCounter;
@@ -33,10 +39,12 @@ public class TicketService {
     public TicketService(ReservationRepository reservationRepository,
                          GameSeatRepository gameSeatRepository,
                          TicketEventOutboxService ticketEventOutboxService,
+                         JdbcTemplate jdbcTemplate,
                          MeterRegistry meterRegistry) {
         this.reservationRepository = reservationRepository;
         this.gameSeatRepository = gameSeatRepository;
         this.ticketEventOutboxService = ticketEventOutboxService;
+        this.jdbcTemplate = jdbcTemplate;
 
         // 메트릭 정의
         this.bookingRequestedCounter = Counter.builder("ticket_booking_total")
@@ -61,6 +69,8 @@ public class TicketService {
 
     @Transactional
     public Reservation requestReservation(Long userId, Long gameId, Long seatId, String lockId) {
+        validateReservableGame(gameId);
+
         String idempotencyKey = String.format("ticket:%d:%d:%d", userId, gameId, seatId);
         Reservation existingReservation = reservationRepository.findByIdempotencyKey(idempotencyKey)
                 .orElse(null);
@@ -97,6 +107,27 @@ public class TicketService {
                 lockId);
         bookingRequestedCounter.increment();
         return savedReservation;
+    }
+
+    private void validateReservableGame(Long gameId) {
+        LocalDateTime gameStartTime;
+        try {
+            gameStartTime = jdbcTemplate.queryForObject(
+                    "SELECT game_start_time FROM game_schema.games WHERE game_id = ?",
+                    (rs, rowNum) -> {
+                        Timestamp timestamp = rs.getTimestamp("game_start_time");
+                        return timestamp == null ? null : timestamp.toLocalDateTime();
+                    },
+                    gameId);
+        } catch (EmptyResultDataAccessException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "경기를 찾을 수 없습니다. gameId=" + gameId);
+        }
+
+        if (gameStartTime == null || !gameStartTime.isAfter(LocalDateTime.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "이미 시작했거나 종료된 경기는 예매할 수 없습니다.");
+        }
     }
 
     /**

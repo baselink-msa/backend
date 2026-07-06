@@ -241,6 +241,7 @@ public class AdminService {
             throw new BusinessException("GAME_NOT_FOUND", HttpStatus.NOT_FOUND,
                     "경기를 찾을 수 없습니다. gameId=" + gameId);
         }
+        waitingRoomPolicyRepository.deleteByGameId(gameId);
         gameSeatRepository.deleteByGameId(gameId);
         gameRepository.deleteById(gameId);
     }
