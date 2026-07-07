@@ -13,12 +13,16 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,6 +39,9 @@ class TicketServiceTest {
     @Mock
     private TicketEventOutboxService ticketEventOutboxService;
 
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
     private TicketService ticketService;
 
     @BeforeEach
@@ -43,12 +50,14 @@ class TicketServiceTest {
                 reservationRepository,
                 gameSeatRepository,
                 ticketEventOutboxService,
+                jdbcTemplate,
                 new SimpleMeterRegistry());
     }
 
     @Test
     void requestReservationSavesReservationAndRequestedEvent() {
         Reservation saved = reservation(101L, Reservation.ReservationStatus.PENDING);
+        mockReservableGame(1L);
         when(reservationRepository.findByIdempotencyKey("ticket:7:1:12"))
                 .thenReturn(Optional.empty());
         when(reservationRepository.save(any(Reservation.class))).thenReturn(saved);
@@ -76,6 +85,7 @@ class TicketServiceTest {
     @Test
     void duplicateRequestReturnsExistingReservationWithoutNewEvent() {
         Reservation existing = reservation(101L, Reservation.ReservationStatus.PENDING);
+        mockReservableGame(1L);
         when(reservationRepository.findByIdempotencyKey("ticket:7:1:12"))
                 .thenReturn(Optional.of(existing));
 
@@ -128,5 +138,13 @@ class TicketServiceTest {
                 .createdAt(LocalDateTime.now().minusSeconds(5))
                 .updatedAt(LocalDateTime.now())
                 .build();
+    }
+
+    private void mockReservableGame(Long gameId) {
+        when(jdbcTemplate.queryForObject(
+                anyString(),
+                any(RowMapper.class),
+                eq(gameId)))
+                .thenReturn(LocalDateTime.now().plusDays(1));
     }
 }
